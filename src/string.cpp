@@ -250,8 +250,10 @@ String filename_from_path(String s) {
 		}
 		s.text += j+1;
 		s.len = i-j-1;
+		return s;
+	} else {
+		return make_string(nullptr, 0);
 	}
-	return make_string(nullptr, 0);
 }
 
 String remove_directory_from_path(String s) {

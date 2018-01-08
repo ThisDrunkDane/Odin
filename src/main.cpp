@@ -6,11 +6,11 @@
 #include "tokenizer.cpp"
 #include "exact_value.cpp"
 #include "parser.cpp"
-#include "docs.cpp"
 #include "checker.cpp"
 #include "ir.cpp"
 #include "ir_opt.cpp"
 #include "ir_print.cpp"
+#include "docs.cpp"
 
 #if defined(GB_SYSTEM_WINDOWS)
 // NOTE(bill): 'name' is used in debugging and profiling modes
@@ -625,7 +625,7 @@ int main(int arg_count, char **arg_ptr) {
 
 		init_filename = args[2];
 		build_context.generate_docs = true;
-		#if 1
+		#if 0
 		print_usage_line(0, "Documentation generation is not yet supported");
 		return 1;
 		#endif

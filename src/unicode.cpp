@@ -41,3 +41,8 @@ bool rune_is_whitespace(Rune r) {
 	}
 	return false;
 }
+
+Rune rune_to_lower(Rune r) {
+	utf8proc_int32_t lower = utf8proc_tolower(r);
+	return lower;
+}

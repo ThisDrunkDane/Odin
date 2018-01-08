@@ -1,0 +1,29 @@
+{
+    "folders":
+    [
+        {
+            "name": "Odin: Source",
+            "path": "./src",
+            "file_exclude_patterns": [ "*.ll", "*.bc" ],
+        },
+        {
+            "name": "Odin: Main",
+            "path": ".",
+            "file_exclude_patterns": [ "nohup.out", "*.ll", "*.bc", "*.otm" ],
+            "folder_exclude_patterns": [ "build", "src"],
+        },
+        {
+            "name": "Odin: Build",
+            "path": "./build",
+            "folder_exclude_patterns": [ ".vs"],
+        },
+        {
+            "name": "Shared",
+            "path": "E:/Odin/Shared",
+        },
+        {
+            "name": "Odin Compiler: Core",
+            "path": "./core",
+        },
+    ]
+}

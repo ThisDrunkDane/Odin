@@ -60,7 +60,6 @@ struct AstFile {
 	bool                is_global_scope;
 	Array<AstNode *>    imports_and_exports; // 'import' 'using import' 'export'
 
-
 	AstNode *           curr_proc;
 	isize               scope_level;
 	Scope *             scope;       // NOTE(bill): Created in checker
