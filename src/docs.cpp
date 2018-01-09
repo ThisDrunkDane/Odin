@@ -164,6 +164,101 @@ void print_type(gbFile *doc_file, AstNode *node) {
 			gb_fprintf(doc_file, "{}");
 		case_end;
 
+		case_ast_node(el, Ellipsis, node);
+			gb_fprintf(doc_file, "...");
+			print_type(doc_file, el->expr);
+		case_end;
+
+		case_ast_node(t, TypeType, node);
+			gb_fprintf(doc_file, "type");
+			if(t->specialization != nullptr) {
+				print_type(doc_file, t->specialization);
+			}
+		case_end;
+
+		case_ast_node(pt, PolyType, node);
+			gb_fprintf(doc_file, "$");
+			print_type(doc_file, pt->type);
+			if(pt->specialization != nullptr) {
+				gb_fprintf(doc_file, "/");
+				print_type(doc_file, pt->specialization);
+			}
+		case_end;
+
+		case_ast_node(m, MapType, node);
+			gb_fprintf(doc_file, "[");
+			print_type(doc_file, m->key);
+			gb_fprintf(doc_file, "]");
+			print_type(doc_file, m->value);
+		case_end;
+
+		case_ast_node(bd, BasicDirective, node);
+			gb_fprintf(doc_file, "#");
+			gb_fprintf(doc_file, "%.*s", LIT(bd->name));
+		case_end;
+
+		case_ast_node(prt, ProcType, node)
+			gb_fprintf(doc_file, "proc (");
+			if(prt->params != nullptr) {
+				ast_node(list, FieldList, prt->params);
+				for_array(param_index, list->list) {
+					AstNode *param =  list->list[param_index];
+					print_type(doc_file, param);
+				}
+			}
+
+			if(prt->results != nullptr) {
+				ast_node(list, FieldList, prt->results);
+				gb_fprintf(doc_file, ") -> (");
+				for_array(result_index, list->list) {
+					AstNode *result =  list->list[result_index];
+					print_type(doc_file, result);
+				}
+			}
+			gb_fprintf(doc_file, ")");
+		case_end;
+
+		case_ast_node(f, Field, node);
+			for_array(names_index, f->names) {
+				AstNode *name = f->names[names_index];
+				ast_node(ident, Ident, name);
+				gb_fprintf(doc_file, "%.*s", LIT(ident->token.string));
+			}
+
+			if (f->type != nullptr) {
+				gb_fprintf(doc_file, " : ");
+				print_type(doc_file, f->type);
+			} else {
+				gb_fprintf(doc_file, " := ");
+				print_type(doc_file, f->default_value);
+			}
+		case_end;
+
+		case_ast_node(ut, UnionType, node);
+			for_array(ui, ut->variants) {
+				print_type(doc_file, ut->variants[ui]);
+				if(ui != ut->variants.count-1) {
+					gb_fprintf(doc_file, ", ");
+				}
+			}
+		case_end;
+
+		case_ast_node(ce, CallExpr, node);
+			print_type(doc_file, ce->proc);
+			gb_fprintf(doc_file, "(");
+			for_array(arg_index, ce->args) {
+				AstNode *arg = ce->args[arg_index];
+				print_type(doc_file, arg);
+				if(arg_index != ce->args.count-1) {
+					gb_fprintf(doc_file, ", ");	
+				}
+			}
+			gb_fprintf(doc_file, ")");
+		case_end;
+
+		case_ast_node(imp, Implicit, node);
+			gb_fprintf(doc_file, "%.*s", LIT(imp->string));
+		case_end;
 
 		default : 
 			gb_fprintf(doc_file, "???[%.*s]", LIT(ast_node_strings[node->kind]));
@@ -200,8 +295,13 @@ void print_struct_type(gbFile *doc_file, AstNode *name, AstNode *type, CommentGr
 				} else {
 					skip = false;
 				}
-
-				gb_fprintf(doc_file, "   %.*s", LIT(field_ident->token.string));
+				if(fj == 0) {
+					gb_fprintf(doc_file, "    ");
+				}
+				gb_fprintf(doc_file, "%.*s", LIT(field_ident->token.string));
+				if(fj != field->names.count-1) {
+					gb_fprintf(doc_file, ", ");
+				}
 			}
 			
 			if(skip) {
@@ -211,12 +311,14 @@ void print_struct_type(gbFile *doc_file, AstNode *name, AstNode *type, CommentGr
 			if (field->type != nullptr) {
 				gb_fprintf(doc_file, " : ");
 				print_type(doc_file, field->type);
-				gb_fprintf(doc_file, "\n");
 			} else {
 				gb_fprintf(doc_file, " := ");
 				print_type(doc_file, field->default_value);
-				gb_fprintf(doc_file, "\n");
 			}
+			if(fi != st->fields.count-1) {
+				gb_fprintf(doc_file, ",");
+			}
+			gb_fprintf(doc_file, "\n");
 		}
 		gb_fprintf(doc_file, "}\n");
 	} else {
@@ -331,6 +433,7 @@ void print_proc_type(gbFile *doc_file, AstNode *name, AstNode *type, bool helper
 
 	ast_node(pt, ProcType, type);
 	gb_fprintf(doc_file, "## %.*s\n\n", LIT(ident->token.string));
+	gb_fprintf(doc_file, "Type: Struct\n\n");
 	gb_fprintf(doc_file, "Location: %.*s:%d\n\n", LIT(ident->token.pos.file), ident->token.pos.line);
 
 	ast_node(list, FieldList, pt->params);
@@ -345,11 +448,17 @@ void print_proc_type(gbFile *doc_file, AstNode *name, AstNode *type, bool helper
 			for_array(fj, field->names) {
 				AstNode *field_name = field->names[fj];
 				ast_node(field_ident, Ident, field_name);
-				gb_fprintf(doc_file, "   %.*s ", LIT(field_ident->token.string));
+				if(fj == 0) {
+					gb_fprintf(doc_file, "    ");
+				}
+				gb_fprintf(doc_file, "%.*s", LIT(field_ident->token.string));
+				if(fj != field->names.count-1) {
+					gb_fprintf(doc_file, ", ");
+				}
 			}
 
 			if (field->type != nullptr) {
-				gb_fprintf(doc_file, ": ");
+				gb_fprintf(doc_file, " : ");
 				print_type(doc_file, field->type);
 			} else {
 				gb_fprintf(doc_file, " := ");
@@ -399,7 +508,10 @@ void print_proc_type(gbFile *doc_file, AstNode *name, AstNode *type, bool helper
 			for_array(fj, field->names) {
 				AstNode *field_name = field->names[fj];
 				ast_node(field_ident, Ident, field_name);
-				gb_fprintf(doc_file, "%.*s ", LIT(field_ident->token.string));
+				gb_fprintf(doc_file, "%.*s", LIT(field_ident->token.string));
+				if(fj != field->names.count-1) {
+					gb_fprintf(doc_file, ", ");
+				}
 			}
 
 			if (field->type != nullptr) {
@@ -505,6 +617,49 @@ void print_const_type(gbFile *doc_file, AstNode *name, AstNode *type, bool skip_
 	gb_fprintf(doc_file, "`\n\n");
 }
 
+void print_union_type(gbFile *doc_file, AstNode *name, AstNode *type, bool skip_hidden) {
+	GB_ASSERT(name->kind == AstNode_Ident);
+	GB_ASSERT(type->kind == AstNode_UnionType);
+	ast_node(ident, Ident, name);
+	if(ident->token.string[0] == '_' && skip_hidden) {
+		return;
+	}
+	ast_node(ut, UnionType, type);
+
+	gb_fprintf(doc_file, "## %.*s\n", LIT(ident->token.string));
+
+	gb_fprintf(doc_file, "```go\n");
+	gb_fprintf(doc_file, "%.*s :: union {\n", LIT(ident->token.string));
+	for_array(var_index, ut->variants) {
+		AstNode *variant = ut->variants[var_index];
+		gb_fprintf(doc_file, "    ");
+		print_type(doc_file, variant);
+		if(var_index != ut->variants.count-1) {
+			gb_fprintf(doc_file, ", ");
+		}
+		gb_fprintf(doc_file, "\n");
+	}
+	gb_fprintf(doc_file, "}\n```\n");
+
+	//Markdown
+	gb_fprintf(doc_file, "Type: Union\n\n");
+	gb_fprintf(doc_file, "Location: %.*s:%d\n\n", LIT(ident->token.pos.file), ident->token.pos.line);
+	gb_fprintf(doc_file, "| Variant | Desc |\n");
+	gb_fprintf(doc_file, "|-|-|\n");
+	for_array(var_index, ut->variants) {
+		gb_fprintf(doc_file, "|");
+		AstNode *variant = ut->variants[var_index];
+		gb_fprintf(doc_file, "<a style=\"color:inherit; text-decoration:inherit\" href=\"");
+		print_anchor(doc_file, variant);
+		gb_fprintf(doc_file, "\">");
+		print_type(doc_file, variant);
+		gb_fprintf(doc_file, "</a>");
+		gb_fprintf(doc_file, "|");
+		gb_fprintf(doc_file, " |");
+		gb_fprintf(doc_file, "\n");
+	}
+}
+
 void print_declaration(gbFile *doc_file, AstNode *decl) {
 	switch (decl->kind) {
 		case_ast_node(vd, ValueDecl, decl);
@@ -532,11 +687,20 @@ void print_declaration(gbFile *doc_file, AstNode *decl) {
 					case AstNode_UnaryExpr :
 					case AstNode_Ident :
 					case AstNode_SelectorExpr :
+					case AstNode_DynamicArrayType :
 						print_const_type(doc_file, name, value, true); 
 						break;
 
 					case AstNode_ProcGroup : 
 						print_proc_group(doc_file, name, value, true);
+						break;
+
+					case AstNode_UnionType :
+						print_union_type(doc_file, name, value, true);
+						break;
+
+					default :
+						gb_printf("DONT KNOW HOW TO PRINT: %.*s\n", LIT(ast_node_strings[value->kind]));
 						break;
 				}
 			}
@@ -555,12 +719,30 @@ void document_file(AstFile *file) {
 	String fullpath = tokenizer->fullpath;
 	gbFile doc_file = {};
 	char doc_name[1024];
-	gb_snprintf(doc_name, 1024, "%.*s.md", LIT(filename_from_path(fullpath)));
+	gb_snprintf(doc_name, 1024, "%.*s.html.md", LIT(filename_from_path(fullpath)));
 	gb_file_create(&doc_file, doc_name);
-	gb_printf("Parsing: %.*s... \n", LIT(fullpath));
+	gb_printf("------ Parsing: %.*s ------\n", LIT(fullpath));
+#if 0
+	gb_fprintf(&doc_file, "---\n");
+	gb_fprintf(&doc_file, "title: %.*s API Reference\n",  LIT(filename_from_path(fullpath)));
+	gb_fprintf(&doc_file, "\n");
+	gb_fprintf(&doc_file, "language_tabs:\n");
+	gb_fprintf(&doc_file, "  - odin\n");
+	gb_fprintf(&doc_file, "\n");
+	gb_fprintf(&doc_file, "toc_footers:\n");
+	gb_fprintf(&doc_file, "  - <a href='https://github.com/odin-lang/odin'>Generated by the Odin Compiler</a>\n");
+	gb_fprintf(&doc_file, "  - <a href='https://github.com/lord/slate'>Documentation Powered by Slate</a>\n");
+	gb_fprintf(&doc_file, "\n");
+	gb_fprintf(&doc_file, "search: true\n");
+	gb_fprintf(&doc_file, "---");
+	gb_fprintf(&doc_file, "\n");
+	gb_fprintf(&doc_file, "# Notice\n");
+	gb_fprintf(&doc_file, "\n");
+	gb_fprintf(&doc_file, "This is a test for auto generating documentation from odin code via the Odin compiler.\n\n");
+#endif
 
 	//Collect Decls
-	Array<AstNode *> struct_decls = make_ast_node_array(file);
+	Array<AstNode *> type_decls = make_ast_node_array(file);
 	Array<AstNode *> proc_decls   = make_ast_node_array(file);
 	Array<AstNode *> enum_decls   = make_ast_node_array(file);
 	Array<AstNode *> helper_decls = make_ast_node_array(file);
@@ -579,33 +761,38 @@ void document_file(AstFile *file) {
 					}
 					AstNode *value = vd->values[i];
 					switch (value->kind) {
+						case AstNode_UnionType :
 						case AstNode_StructType : 
-							array_add(&struct_decls, decl);
+							array_add(&type_decls, decl);
 							break;
 						case AstNode_ProcGroup :
 						case AstNode_ProcLit : 
+						case AstNode_HelperType :
 							array_add(&proc_decls, decl);
 							break;
 						case AstNode_EnumType : 
 							array_add(&enum_decls, decl);
 							break;
-						case AstNode_HelperType :
-							array_add(&helper_decls, decl);
-							break;	
 						
+						//These need to handled in a different way, since some of them might be a typedef
 						case AstNode_BasicLit :
 						case AstNode_BinaryExpr :
 						case AstNode_UnaryExpr :
-						case AstNode_Ident : //typedef, probably should be handled by itself (check for alias and such)
+						case AstNode_Ident : 
 						case AstNode_SelectorExpr :
+						case AstNode_DynamicArrayType :
 							array_add(&const_decls, decl);
 							break;
 
 						default : 
-							gb_printf("\nVALUE DECL NOT HANDLED: %.*s\n", LIT(ast_node_strings[value->kind]));
+							gb_printf("VALUE DECL NOT HANDLED: %.*s\n", LIT(ast_node_strings[value->kind]));
 							break;
 					}
 				}
+			case_end;
+
+			case_ast_node(id, ForeignBlockDecl, decl);
+				//TODO(Hoej): Not sure how to handle this, seperate category? intermingle with current ones?
 			case_end;
 
 			case_ast_node(id, ImportDecl, decl);
@@ -622,6 +809,10 @@ void document_file(AstFile *file) {
 				document_file(ed->file);
 			case_end;
 
+			case AstNode_ForeignImportDecl : 
+				//Intentionally not handled
+				break;
+
 			default : 
 				gb_printf("DECL NOT HANDLED: %.*s\n", LIT(ast_node_strings[decl->kind]));
 			break;
@@ -635,22 +826,17 @@ void document_file(AstFile *file) {
 			print_declaration(&doc_file, decl);
 		}
 	}
-	if(struct_decls.count > 0) {
-		gb_fprintf(&doc_file, "# %.*s - Structs\n\n", LIT(filename_from_path(fullpath)));
-		for_array(decl_index, struct_decls) {
-			AstNode *decl = struct_decls[decl_index];
+	if(type_decls.count > 0) {
+		gb_fprintf(&doc_file, "# %.*s - Types\n\n", LIT(filename_from_path(fullpath)));
+		for_array(decl_index, type_decls) {
+			AstNode *decl = type_decls[decl_index];
 			print_declaration(&doc_file, decl);
 		}
 	}
-	if(proc_decls.count > 0 || helper_decls.count > 0) {
+	if(proc_decls.count > 0) {
 		gb_fprintf(&doc_file, "# %.*s - Procs\n\n", LIT(filename_from_path(fullpath)));
 		for_array(decl_index, proc_decls) {
 			AstNode *decl = proc_decls[decl_index];
-			print_declaration(&doc_file, decl);
-		}
-
-		for_array(decl_index, helper_decls) {
-			AstNode *decl = helper_decls[decl_index];
 			print_declaration(&doc_file, decl);
 		}
 	}
@@ -661,7 +847,7 @@ void document_file(AstFile *file) {
 			print_declaration(&doc_file, decl);
 		}
 	}
-	gb_printf("Done!\n");
+	gb_printf("------ Done! ------\n\n");
 	gb_file_close(&doc_file);
 	gb_fprintf(&doc_file, "------------------------------------\n");
 }
