@@ -4,8 +4,8 @@
 #include "timings.cpp"
 #include "build_settings.cpp"
 #include "tokenizer.cpp"
-#include "exact_value.cpp"
 #include "parser.cpp"
+#include "exact_value.cpp"
 #include "checker.cpp"
 #include "ir.cpp"
 #include "ir_opt.cpp"
@@ -639,11 +639,11 @@ int main(int arg_count, char **arg_ptr) {
 
 	build_context.command = command;
 
-	if (!parse_build_flags(args)) {
-		return 1;
+	if(build_context.command == "build") {
+		if (!parse_build_flags(args)) {
+			return 1;
+		}
 	}
-
-
 
 	// NOTE(bill): add 'shared' directory if it is not already set
 	if (!find_library_collection_path(str_lit("shared"), nullptr)) {
@@ -653,6 +653,7 @@ int main(int arg_count, char **arg_ptr) {
 
 
 	init_build_context();
+	init_docs_context();
 	if (build_context.word_size == 4) {
 		print_usage_line(0, "%s 32-bit is not yet supported", args[0]);
 		return 1;
@@ -674,6 +675,9 @@ int main(int arg_count, char **arg_ptr) {
 	}
 
 	if (build_context.generate_docs) {
+		if(!parse_docs_flags(args)) {
+			return 1;
+		}
 		generate_documentation(&parser);
 		return 0;
 	}

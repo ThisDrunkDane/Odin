@@ -1,4 +1,207 @@
 // Generates Documentation
+enum DocsFlagKind {
+	DocsFlag_Invalid,
+	DocsFlag_Format,
+	DocsFlag_COUNT,
+};
+
+enum DocsFlagParamKind {
+	DocsFlagParam_None,
+
+	DocsFlagParam_Boolean,
+	DocsFlagParam_Integer,
+	DocsFlagParam_Float,
+	DocsFlagParam_String,
+
+	DocsFlagParam_COUNT,
+};
+
+struct DocsFlag {
+	DocsFlagKind      kind;
+	String            name;
+	DocsFlagParamKind param_kind;
+};
+
+enum DocsFormat {
+	DocsFormat_Invalid,
+
+	DocsFormat_Slate,
+	DocsFormat_Markdown,
+	DocsFormat_Html,
+	
+	DocsFormat_COUNT,
+};
+
+struct DocsContext {
+	DocsFormat doc_format;
+};
+
+gb_global DocsContext docs_context = {};
+
+void init_docs_context(void) {
+	DocsContext *dc = &docs_context;
+
+	if(dc->doc_format == DocsFormat_Invalid) {
+		dc->doc_format = DocsFormat_Slate;
+	}
+}
+
+void add_flag(Array<DocsFlag> *docs_flags, DocsFlagKind kind, String name, DocsFlagParamKind param_kind) {
+	DocsFlag flag = {kind, name, param_kind};
+	array_add(docs_flags, flag);
+}
+
+bool parse_docs_flags(Array<String> args) {
+	Array<DocsFlag> docs_flags = {};
+	array_init(&docs_flags, heap_allocator(), DocsFlag_COUNT);
+	add_flag(&docs_flags, DocsFlag_Format, str_lit("format"), DocsFlagParam_String);
+
+
+	GB_ASSERT(args.count >= 3);
+	Array<String> flag_args = args;
+	flag_args.data  += 3;
+	flag_args.count -= 3;
+
+	bool set_flags[DocsFlag_COUNT] = {};
+
+	bool bad_flags = false;
+	for_array(i, flag_args) {
+		String flag = flag_args[i];
+		if (flag[0] != '-') {
+			gb_printf_err("Invalid flag: %.*s\n", LIT(flag));
+			continue;
+		}
+		String name = substring(flag, 1, flag.len);
+		isize end = 0;
+		for (; end < name.len; end++) {
+			if (name[end] == '=') break;
+		}
+		name = substring(name, 0, end);
+		String param = {};
+		if (end < flag.len-1) param = substring(flag, 2+end, flag.len);
+
+		bool found = false;
+		for_array(docs_flag_index, docs_flags) {
+			DocsFlag df = docs_flags[docs_flag_index];
+			if (df.name == name) {
+				found = true;
+				if (set_flags[df.kind]) {
+					gb_printf_err("Previous flag set: '%.*s'\n", LIT(name));
+					bad_flags = true;
+				} else {
+					ExactValue value = {};
+					bool ok = false;
+					if (df.param_kind == DocsFlagParam_None) {
+						if (param.len == 0) {
+							ok = true;
+						} else {
+							gb_printf_err("Flag '%.*s' was not expecting a parameter '%.*s'\n", LIT(name), LIT(param));
+							bad_flags = true;
+						}
+					} else if (param.len == 0) {
+						gb_printf_err("Flag missing for '%.*s'\n", LIT(name));
+						bad_flags = true;
+					} else {
+						ok = true;
+						switch (df.param_kind) {
+						default: ok = false; break;
+						case DocsFlagParam_Boolean: {
+							if (str_eq_ignore_case(param, str_lit("t")) ||
+							    str_eq_ignore_case(param, str_lit("true")) ||
+							    param == "1") {
+								value = exact_value_bool(true);
+							} else if (str_eq_ignore_case(param, str_lit("f")) ||
+							           str_eq_ignore_case(param, str_lit("false")) ||
+							           param == "0") {
+								value = exact_value_bool(false);
+							} else {
+								gb_printf_err("Invalid flag parameter for '%.*s' = '%.*s'\n", LIT(name), LIT(param));
+							}
+						} break;
+						case DocsFlagParam_Integer:
+							value = exact_value_integer_from_string(param);
+							break;
+						case DocsFlagParam_Float:
+							value = exact_value_float_from_string(param);
+							break;
+						case DocsFlagParam_String:
+							value = exact_value_string(param);
+							break;
+						}
+					}
+					if (ok) {
+						switch (df.param_kind) {
+						case DocsFlagParam_None:
+							if (value.kind != ExactValue_Invalid) {
+								gb_printf_err("%.*s expected no value, got %.*s", LIT(name), LIT(param));
+								bad_flags = true;
+								ok = false;
+							}
+							break;
+						case DocsFlagParam_Boolean:
+							if (value.kind != ExactValue_Bool) {
+								gb_printf_err("%.*s expected a boolean, got %.*s", LIT(name), LIT(param));
+								bad_flags = true;
+								ok = false;
+							}
+							break;
+						case DocsFlagParam_Integer:
+							if (value.kind != ExactValue_Integer) {
+								gb_printf_err("%.*s expected an integer, got %.*s", LIT(name), LIT(param));
+								bad_flags = true;
+								ok = false;
+							}
+							break;
+						case DocsFlagParam_Float:
+							if (value.kind != ExactValue_Float) {
+								gb_printf_err("%.*s expected a floating pointer number, got %.*s", LIT(name), LIT(param));
+								bad_flags = true;
+								ok = false;
+							}
+							break;
+						case DocsFlagParam_String:
+							if (value.kind != ExactValue_String) {
+								gb_printf_err("%.*s expected a string, got %.*s", LIT(name), LIT(param));
+								bad_flags = true;
+								ok = false;
+							}
+							break;
+						}
+
+						if (ok) switch (df.kind) {
+							case DocsFlag_Format : {
+								GB_ASSERT(value.kind == ExactValue_String);
+								if(value.value_string == "slate") {
+									docs_context.doc_format = DocsFormat_Slate;
+								} else if(value.value_string == "html") {
+									//docs_context.doc_format = DocsFormat_Html;
+									docs_context.doc_format = DocsFormat_Slate;
+									gb_printf_err("'Html' format is not implemented, using 'Slate'\n");
+								} else if(value.value_string == "markdown") {
+									//docs_context.doc_format = DocsFormat_Markdown;
+									docs_context.doc_format = DocsFormat_Slate;
+									gb_printf_err("'Markdown' format is not implemented, using 'Slate'\n");
+								} else {
+									gb_printf_err("Unsupported documentation format '%.*s'\n", LIT(value.value_string));
+									bad_flags = true;
+								}
+							}
+						}
+					}
+
+					set_flags[df.kind] = ok;
+				}
+				break;
+			}
+		}
+		if (!found) {
+			gb_printf_err("Unknown flag: '%.*s'\n", LIT(name));
+			bad_flags = true;
+		}
+	}
+
+	return !bad_flags;
+}
 
 String alloc_comment_group_string(gbAllocator a, CommentGroup g) {
 	isize len = 0;
@@ -93,7 +296,7 @@ void print_anchor(gbFile *doc_file, AstNode *node) {
 	} 
 }
 
-void print_type(gbFile *doc_file, AstNode *node) {
+void print_type(gbFile *doc_file, AstNode *node, char *new_line = "\n") {
 	String result;
 	switch (node->kind) {
 		case_ast_node(ident, Ident, node);
@@ -235,12 +438,25 @@ void print_type(gbFile *doc_file, AstNode *node) {
 		case_end;
 
 		case_ast_node(ut, UnionType, node);
+			gb_fprintf(doc_file, "union { ");
+			if(ut->variants.count > 3) {
+				gb_fprintf(doc_file, new_line);
+			}
 			for_array(ui, ut->variants) {
 				print_type(doc_file, ut->variants[ui]);
 				if(ui != ut->variants.count-1) {
 					gb_fprintf(doc_file, ", ");
 				}
+				if(ui != ut->variants.count-1) {
+					if(ut->variants.count > 3) {
+						gb_fprintf(doc_file, new_line);
+					}
+				}
 			}
+			if(ut->variants.count > 3) {
+				gb_fprintf(doc_file, new_line);
+			}
+			gb_fprintf(doc_file, " }");
 		case_end;
 
 		case_ast_node(ce, CallExpr, node);
@@ -310,7 +526,7 @@ void print_struct_type(gbFile *doc_file, AstNode *name, AstNode *type, CommentGr
 
 			if (field->type != nullptr) {
 				gb_fprintf(doc_file, " : ");
-				print_type(doc_file, field->type);
+				print_type(doc_file, field->type, "");
 			} else {
 				gb_fprintf(doc_file, " := ");
 				print_type(doc_file, field->default_value);
@@ -369,7 +585,7 @@ void print_struct_type(gbFile *doc_file, AstNode *name, AstNode *type, CommentGr
 				gb_fprintf(doc_file, "<a style=\"color:inherit; text-decoration:inherit\" href=\"");
 				print_anchor(doc_file, field->type);
 				gb_fprintf(doc_file, "\">");
-				print_type(doc_file, field->type);
+				print_type(doc_file, field->type, "<br/>");
 				gb_fprintf(doc_file, "</a>");
 			} else {
 				gb_fprintf(doc_file, ":= ");
@@ -853,6 +1069,12 @@ void document_file(AstFile *file) {
 }
 
 void generate_documentation(Parser *parser) {
+	switch (docs_context.doc_format) {
+		case DocsFormat_Slate : {
+			gb_printf("Generating documentation using 'Slate' format.\n");
+		}
+	}
+
 	for_array(file_index, parser->files) {
 		AstFile *file = parser->files[file_index];
 		document_file(file);
