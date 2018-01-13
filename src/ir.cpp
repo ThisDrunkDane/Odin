@@ -1626,11 +1626,13 @@ irValue *ir_emit_call(irProcedure *p, irValue *value, irValue **args, isize arg_
 		context_ptr = ir_find_or_generate_context_ptr(p);
 	}
 
+	bool is_c_vararg = pt->Proc.c_vararg;
 	isize param_count = pt->Proc.param_count;
-	if (pt->Proc.c_vararg) {
+	if (is_c_vararg) {
 		GB_ASSERT(param_count-1 <= arg_count);
+		param_count -= 1;
 	} else {
-		GB_ASSERT(param_count == arg_count);
+		GB_ASSERT_MSG(param_count == arg_count, "%td == %td", param_count, arg_count);
 	}
 	for (isize i = 0; i < param_count; i++) {
 		Entity *e = pt->Proc.params->Tuple.variables[i];
@@ -3954,11 +3956,12 @@ irValue *ir_emit_min(irProcedure *proc, Type *t, irValue *x, irValue *y) {
 	if (is_type_float(t)) {
 		gbAllocator a = proc->module->allocator;
 		i64 sz = 8*type_size_of(a, t);
-		irValue **args = gb_alloc_array(a, irValue *, 1);
+		irValue **args = gb_alloc_array(a, irValue *, 2);
 		args[0] = x;
+		args[1] = y;
 		switch (sz) {
-		case 32: return ir_emit_global_call(proc, "__min_f32", args, 1);
-		case 64: return ir_emit_global_call(proc, "__min_f64", args, 1);
+		case 32: return ir_emit_global_call(proc, "__min_f32", args, 2);
+		case 64: return ir_emit_global_call(proc, "__min_f64", args, 2);
 		}
 		GB_PANIC("Unknown float type");
 	}
@@ -3971,11 +3974,12 @@ irValue *ir_emit_max(irProcedure *proc, Type *t, irValue *x, irValue *y) {
 	if (is_type_float(t)) {
 		gbAllocator a = proc->module->allocator;
 		i64 sz = 8*type_size_of(a, t);
-		irValue **args = gb_alloc_array(a, irValue *, 1);
+		irValue **args = gb_alloc_array(a, irValue *, 2);
 		args[0] = x;
+		args[1] = y;
 		switch (sz) {
-		case 32: return ir_emit_global_call(proc, "__max_f32", args, 1);
-		case 64: return ir_emit_global_call(proc, "__max_f64", args, 1);
+		case 32: return ir_emit_global_call(proc, "__max_f32", args, 2);
+		case 64: return ir_emit_global_call(proc, "__max_f64", args, 2);
 		}
 		GB_PANIC("Unknown float type");
 	}

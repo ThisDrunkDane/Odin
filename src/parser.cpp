@@ -3964,7 +3964,7 @@ AstNode *parse_switch_stmt(AstFile *f) {
 	body = ast_block_stmt(f, list, open, close);
 
 	if (!is_type_match) {
-		tag = convert_stmt_to_expr(f, tag, str_lit("match expression"));
+		tag = convert_stmt_to_expr(f, tag, str_lit("switch expression"));
 		return ast_switch_stmt(f, token, init, tag, body);
 	} else {
 		return ast_type_switch_stmt(f, token, tag, body);
@@ -3988,7 +3988,7 @@ AstNode *parse_defer_stmt(AstFile *f) {
 		stmt = stmt->DeferStmt.stmt;
 		break;
 	case AstNode_ReturnStmt:
-		syntax_error(token, "You cannot a return statement");
+		syntax_error(token, "You cannot defer a return statement");
 		break;
 	}
 
