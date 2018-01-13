@@ -1,7 +1,10 @@
+
+
 // Generates Documentation
 enum DocsFlagKind {
 	DocsFlag_Invalid,
 	DocsFlag_Format,
+	DocsFlag_SkipHidden,
 	DocsFlag_COUNT,
 };
 
@@ -33,16 +36,43 @@ enum DocsFormat {
 };
 
 struct DocsContext {
+	gbFile     doc_file;
+
 	DocsFormat doc_format;
+	bool       skip_set;
+	bool 	   skip_hidden;
 };
 
 gb_global DocsContext docs_context = {};
+
+#define CHECK_SKIP_CONTINUE(ident, skip) if(ident->token.string[0] == '_' && skip) { \
+									         continue; \
+									     } 
+
+#define CHECK_SKIP_RETURN(ident, skip) if(ident->token.string[0] == '_' && skip) { \
+									       return; \
+									   } 
+
+#define CHECK_SKIP_OUT(ident, skip, out) if(ident->token.string[0] == '_' && skip) { \
+										     out = true; \
+										 } else { \
+											 out = false; \
+										 }
+
+#define DOC_PRINT(...) gb_fprintf(&docs_context.doc_file, __VA_ARGS__)
+
+
+#include "docs_helpers.cpp"
 
 void init_docs_context(void) {
 	DocsContext *dc = &docs_context;
 
 	if(dc->doc_format == DocsFormat_Invalid) {
 		dc->doc_format = DocsFormat_Slate;
+	}
+
+	if(!dc->skip_set) {
+		dc->skip_hidden = true;
 	}
 }
 
@@ -55,7 +85,7 @@ bool parse_docs_flags(Array<String> args) {
 	Array<DocsFlag> docs_flags = {};
 	array_init(&docs_flags, heap_allocator(), DocsFlag_COUNT);
 	add_flag(&docs_flags, DocsFlag_Format, str_lit("format"), DocsFlagParam_String);
-
+	add_flag(&docs_flags, DocsFlag_SkipHidden, str_lit("skip-hidden"), DocsFlagParam_Boolean);
 
 	GB_ASSERT(args.count >= 3);
 	Array<String> flag_args = args;
@@ -185,6 +215,14 @@ bool parse_docs_flags(Array<String> args) {
 									gb_printf_err("Unsupported documentation format '%.*s'\n", LIT(value.value_string));
 									bad_flags = true;
 								}
+								break;
+							}
+
+							case DocsFlag_SkipHidden : {
+								GB_ASSERT(value.kind == ExactValue_Bool);
+								docs_context.skip_set    = true;
+								docs_context.skip_hidden = value.value_bool;
+								break;
 							}
 						}
 					}
@@ -230,18 +268,13 @@ String alloc_comment_group_string(gbAllocator a, CommentGroup g) {
 		for (int i = 0; i < comment.len; ++i)
 		{
 			array_add(&backing, comment.text[i]);
-			if(comment.text[i] == '\n') {
-				//array_add(&backing, cast(u8)'\n');
-			}
 		}
-
-		//array_add(&backing, cast(u8)'\n'); 
 	}
 
 	return {backing.data, backing.count};
 }
 
-void print_anchor(gbFile *doc_file, AstNode *node) {
+void print_anchor(AstNode *node) {
 	String result;
 	switch (node->kind) {
 		case_ast_node(ident, Ident, node);
@@ -263,620 +296,646 @@ void print_anchor(gbFile *doc_file, AstNode *node) {
 				}
 			}
 			String new_name = {backing.data, backing .count};
-			gb_fprintf(doc_file, "#%.*s", LIT(new_name));
+			DOC_PRINT("#%.*s", LIT(new_name));
 		case_end;
 
 		case_ast_node(expr, SelectorExpr, node);
-			print_anchor(doc_file, expr->selector);
+			print_anchor(expr->selector);
 		case_end;
 
 		case_ast_node(expr, UnaryExpr, node);
-			print_anchor(doc_file, expr->expr);
+			print_anchor(expr->expr);
 		case_end;
 
 		case_ast_node(expr, ParenExpr, node);
-			print_anchor(doc_file, expr->expr);
+			print_anchor(expr->expr);
 		case_end;
 
 		case_ast_node(ptr, PointerType, node);
-			print_anchor(doc_file, ptr->type);
+			print_anchor(ptr->type);
 		case_end;
 		
 		case_ast_node(da, DynamicArrayType, node);
-			print_anchor(doc_file, da->elem);
+			print_anchor(da->elem);
 		case_end;
 		//NOTE(Hoej): Doesn't print size if specified
 		case_ast_node(at, ArrayType, node);
-			print_anchor(doc_file, at->elem);
+			print_anchor(at->elem);
 		case_end;
 		
 		case_ast_node(lit, CompoundLit, node);
-			print_anchor(doc_file, lit->type);
+			print_anchor(lit->type);
 		case_end;
 	} 
 }
 
-void print_type(gbFile *doc_file, AstNode *node, char *new_line = "\n") {
+void print_type(AstNode *node, char *new_line = "\n") {
 	String result;
 	switch (node->kind) {
 		case_ast_node(ident, Ident, node);
-			gb_fprintf(doc_file, "%.*s", LIT(ident->token.string));
+			DOC_PRINT("%.*s", LIT(ident->token.string));
 		case_end;
 
 		case_ast_node(expr, SelectorExpr, node);
 			ast_node(import, Ident, expr->expr);
 			ast_node(ident, Ident, expr->selector);
-			gb_fprintf(doc_file, "%.*s.", LIT(import->token.string));
-			gb_fprintf(doc_file, "%.*s", LIT(ident->token.string));
+			DOC_PRINT("%.*s.", LIT(import->token.string));
+			DOC_PRINT("%.*s", LIT(ident->token.string));
 		case_end;
 
 		case_ast_node(expr, UnaryExpr, node);
-			gb_fprintf(doc_file, "%.*s", LIT(expr->op.string));
-			print_type(doc_file, expr->expr);
+			DOC_PRINT("%.*s", LIT(expr->op.string));
+			print_type(expr->expr);
 		case_end;
 
 		case_ast_node(expr, ParenExpr, node);
-			gb_fprintf(doc_file, "(");
-			print_type(doc_file, expr->expr);
-			gb_fprintf(doc_file, ")");
+			DOC_PRINT("(");
+			print_type(expr->expr);
+			DOC_PRINT(")");
 		case_end;
 
 		case_ast_node(expr, BinaryExpr, node);
-			print_type(doc_file, expr->left);
+			print_type(expr->left);
 			if (expr->op.string[0] == '|') {
-				gb_fprintf(doc_file, " \\ ", LIT(expr->op.string));
+				DOC_PRINT(" \\ ", LIT(expr->op.string));
 			} else {
-				gb_fprintf(doc_file, " %.*s ", LIT(expr->op.string));
+				DOC_PRINT(" %.*s ", LIT(expr->op.string));
 			}
-			print_type(doc_file, expr->right);
+			print_type(expr->right);
 		case_end;
 
 		case_ast_node(ptr, PointerType, node);
-			gb_fprintf(doc_file, "^");
-			print_type(doc_file, ptr->type);
+			DOC_PRINT("^");
+			print_type(ptr->type);
 		case_end;
 		
 		case_ast_node(da, DynamicArrayType, node);
-			gb_fprintf(doc_file, "[dynamic]");
-			print_type(doc_file, da->elem);
+			DOC_PRINT("[dynamic]");
+			print_type(da->elem);
 		case_end;
 		//NOTE(Hoej): Doesn't print size if specified
 		case_ast_node(at, ArrayType, node);
-			gb_fprintf(doc_file, "[");
+			DOC_PRINT("[");
 			if (at->count != nullptr) {
-				print_type(doc_file, at->count);
+				print_type(at->count);
 			}
-			gb_fprintf(doc_file, "]");
-			print_type(doc_file, at->elem);
+			DOC_PRINT("]");
+			print_type(at->elem);
 		case_end;
 		
 		case_ast_node(lit, BasicLit, node);
 			switch (lit->token.kind) {
 				case Token_String : 
-					gb_fprintf(doc_file, "\"%.*s\"", LIT(lit->token.string));
+					DOC_PRINT("\"%.*s\"", LIT(lit->token.string));
 					break;
 
 				default :
-					gb_fprintf(doc_file, "%.*s", LIT(lit->token.string));
+					DOC_PRINT("%.*s", LIT(lit->token.string));
 					break;
 			}
 		case_end;
 
 		case_ast_node(lit, CompoundLit, node);
-			print_type(doc_file, lit->type);
-			gb_fprintf(doc_file, "{}");
+			print_type(lit->type);
+			DOC_PRINT("{}");
 		case_end;
 
 		case_ast_node(el, Ellipsis, node);
-			gb_fprintf(doc_file, "...");
-			print_type(doc_file, el->expr);
+			DOC_PRINT("...");
+			print_type(el->expr);
 		case_end;
 
 		case_ast_node(t, TypeType, node);
-			gb_fprintf(doc_file, "type");
+			DOC_PRINT("type");
 			if(t->specialization != nullptr) {
-				print_type(doc_file, t->specialization);
+				print_type(t->specialization);
 			}
 		case_end;
 
 		case_ast_node(pt, PolyType, node);
-			gb_fprintf(doc_file, "$");
-			print_type(doc_file, pt->type);
+			DOC_PRINT("$");
+			print_type(pt->type);
 			if(pt->specialization != nullptr) {
-				gb_fprintf(doc_file, "/");
-				print_type(doc_file, pt->specialization);
+				DOC_PRINT("/");
+				print_type(pt->specialization);
 			}
 		case_end;
 
 		case_ast_node(m, MapType, node);
-			gb_fprintf(doc_file, "[");
-			print_type(doc_file, m->key);
-			gb_fprintf(doc_file, "]");
-			print_type(doc_file, m->value);
+			DOC_PRINT("[");
+			print_type(m->key);
+			DOC_PRINT("]");
+			print_type(m->value);
 		case_end;
 
 		case_ast_node(bd, BasicDirective, node);
-			gb_fprintf(doc_file, "#");
-			gb_fprintf(doc_file, "%.*s", LIT(bd->name));
+			DOC_PRINT("#");
+			DOC_PRINT("%.*s", LIT(bd->name));
 		case_end;
 
 		case_ast_node(prt, ProcType, node)
-			gb_fprintf(doc_file, "proc (");
+			DOC_PRINT("proc (");
 			if(prt->params != nullptr) {
 				ast_node(list, FieldList, prt->params);
 				for_array(param_index, list->list) {
 					AstNode *param =  list->list[param_index];
-					print_type(doc_file, param);
+					print_type(param);
 				}
 			}
 
 			if(prt->results != nullptr) {
 				ast_node(list, FieldList, prt->results);
-				gb_fprintf(doc_file, ") -> (");
+				DOC_PRINT(") -> (");
 				for_array(result_index, list->list) {
 					AstNode *result =  list->list[result_index];
-					print_type(doc_file, result);
+					print_type(result);
 				}
 			}
-			gb_fprintf(doc_file, ")");
+			DOC_PRINT(")");
 		case_end;
 
 		case_ast_node(f, Field, node);
 			for_array(names_index, f->names) {
 				AstNode *name = f->names[names_index];
 				ast_node(ident, Ident, name);
-				gb_fprintf(doc_file, "%.*s", LIT(ident->token.string));
+				DOC_PRINT("%.*s", LIT(ident->token.string));
 			}
 
 			if (f->type != nullptr) {
-				gb_fprintf(doc_file, " : ");
-				print_type(doc_file, f->type);
+				DOC_PRINT(" : ");
+				print_type(f->type);
 			} else {
-				gb_fprintf(doc_file, " := ");
-				print_type(doc_file, f->default_value);
+				DOC_PRINT(" := ");
+				print_type(f->default_value);
 			}
 		case_end;
 
 		case_ast_node(ut, UnionType, node);
-			gb_fprintf(doc_file, "union { ");
+			DOC_PRINT("union { ");
 			if(ut->variants.count > 3) {
-				gb_fprintf(doc_file, new_line);
+				DOC_PRINT(new_line);
 			}
 			for_array(ui, ut->variants) {
-				print_type(doc_file, ut->variants[ui]);
+				print_type(ut->variants[ui]);
 				if(ui != ut->variants.count-1) {
-					gb_fprintf(doc_file, ", ");
+					DOC_PRINT(", ");
 				}
 				if(ui != ut->variants.count-1) {
 					if(ut->variants.count > 3) {
-						gb_fprintf(doc_file, new_line);
+						DOC_PRINT(new_line);
 					}
 				}
 			}
 			if(ut->variants.count > 3) {
-				gb_fprintf(doc_file, new_line);
+				DOC_PRINT(new_line);
 			}
-			gb_fprintf(doc_file, " }");
+			DOC_PRINT(" }");
 		case_end;
 
 		case_ast_node(ce, CallExpr, node);
-			print_type(doc_file, ce->proc);
-			gb_fprintf(doc_file, "(");
+			print_type(ce->proc);
+			DOC_PRINT("(");
 			for_array(arg_index, ce->args) {
 				AstNode *arg = ce->args[arg_index];
-				print_type(doc_file, arg);
+				print_type(arg);
 				if(arg_index != ce->args.count-1) {
-					gb_fprintf(doc_file, ", ");	
+					DOC_PRINT(", ");	
 				}
 			}
-			gb_fprintf(doc_file, ")");
+			DOC_PRINT(")");
 		case_end;
 
 		case_ast_node(imp, Implicit, node);
-			gb_fprintf(doc_file, "%.*s", LIT(imp->string));
+			DOC_PRINT("%.*s", LIT(imp->string));
 		case_end;
 
 		default : 
-			gb_fprintf(doc_file, "???[%.*s]", LIT(ast_node_strings[node->kind]));
+			DOC_PRINT("???[%.*s]", LIT(ast_node_strings[node->kind]));
 			break;
 	} 
 }
 
-void print_struct_type(gbFile *doc_file, AstNode *name, AstNode *type, CommentGroup docs, bool skip_hidden) {
+void print_anchor_type(AstNode* type) {
+	DOC_PRINT("<a style=\"color:inherit; text-decoration:inherit\" href=\"");
+	print_anchor(type);
+	DOC_PRINT("\">");
+	print_type(type);
+	DOC_PRINT("</a>");
+}
+
+void print_struct_code(AstNodeIdent *ident, AstNodeStructType *type, bool skip_hidden) {
+	CHECK_SKIP_RETURN(ident, skip_hidden);
+
+	DOC_PRINT("%.*s :: struct ", LIT(ident->token.string));
+	DOC_PRINT("%s", type->is_packed ? "#packed " : "");
+	DOC_PRINT("%s", type->is_raw_union ? "#raw_union " : "");
+	DOC_PRINT("{\n");
+
+	for_array(fi, type->fields) {
+		ast_node(field, Field, type->fields[fi]);
+		bool skip = true;
+		for_array(fj, field->names) {
+			AstNode *field_name = field->names[fj];
+			ast_node(field_ident, Ident, field_name);
+			
+			CHECK_SKIP_OUT(field_ident, skip_hidden, skip);
+			if(skip) {
+				continue;
+			}
+
+			if(fj == 0) {
+				DOC_PRINT("    ");
+			}
+
+			DOC_PRINT("%.*s", LIT(field_ident->token.string));
+			
+			if(fj != field->names.count-1) {
+				DOC_PRINT(", ");
+			}
+		}
+		
+		if(skip) {
+			continue;
+		}
+
+		if (field->type != nullptr) {
+			DOC_PRINT(" : ");
+			print_type(field->type, "");
+		} else {
+			DOC_PRINT(" := ");
+			print_type(field->default_value);
+		}
+
+		if(fi != type->fields.count-1) {
+			DOC_PRINT(",");
+		}
+
+		DOC_PRINT("\n");
+	}
+	DOC_PRINT("}\n");
+}
+
+void print_struct_type(AstNode *name, AstNode *type, CommentGroup docs, bool skip_hidden) {
 	GB_ASSERT(name->kind == AstNode_Ident);
 	GB_ASSERT(type->kind == AstNode_StructType);
 	ast_node(ident, Ident, name);
-	if(ident->token.string[0] == '_' && skip_hidden) {
-		return;
-	}
+	CHECK_SKIP_RETURN(ident, skip_hidden);
 	ast_node(st, StructType, type);
-	gb_fprintf(doc_file, "## %.*s\n\n", LIT(ident->token.string));
+	h2(ident);
 
 	//Code
-	gb_fprintf(doc_file, "```go\n");
+	DOC_PRINT("```go\n");
 	if (st->fields.count > 0) {
-		
-		gb_fprintf(doc_file, "%.*s :: struct ", LIT(ident->token.string));
-		gb_fprintf(doc_file, "%s", st->is_packed ? "#packed " : "");
-		gb_fprintf(doc_file, "%s", st->is_raw_union ? "#raw_union " : "");
-		gb_fprintf(doc_file, "{\n");
-		for_array(fi, st->fields) {
-			ast_node(field, Field, st->fields[fi]);
-			bool skip = true;
-			for_array(fj, field->names) {
-				AstNode *field_name = field->names[fj];
-				ast_node(field_ident, Ident, field_name);
-				if(field_ident->token.string[0] == '_' && skip_hidden) {
-					continue;
-				} else {
-					skip = false;
-				}
-				if(fj == 0) {
-					gb_fprintf(doc_file, "    ");
-				}
-				gb_fprintf(doc_file, "%.*s", LIT(field_ident->token.string));
-				if(fj != field->names.count-1) {
-					gb_fprintf(doc_file, ", ");
-				}
-			}
-			
-			if(skip) {
-				continue;
-			}
-
-			if (field->type != nullptr) {
-				gb_fprintf(doc_file, " : ");
-				print_type(doc_file, field->type, "");
-			} else {
-				gb_fprintf(doc_file, " := ");
-				print_type(doc_file, field->default_value);
-			}
-			if(fi != st->fields.count-1) {
-				gb_fprintf(doc_file, ",");
-			}
-			gb_fprintf(doc_file, "\n");
-		}
-		gb_fprintf(doc_file, "}\n");
+		print_struct_code(ident, st, skip_hidden);
 	} else {
-		gb_fprintf(doc_file, "%.*s :: struct {}\n", LIT(ident->token.string));
+		DOC_PRINT("%.*s :: struct {}\n", LIT(ident->token.string));
 	}
-	gb_fprintf(doc_file, "```\n");
+	DOC_PRINT("```\n\n");
 
-
-	gb_fprintf(doc_file, "Location: %.*s:%d\n\n", LIT(ident->token.pos.file), ident->token.pos.line);
-	if (st->fields.count <= 0) {
-		gb_fprintf(doc_file, "<aside class=\"notice\">This is an opaque struct</aside>\n\n");
-	} 
-/*	String doc_str = alloc_comment_group_string(heap_allocator(), docs);
-	gb_fprintf(doc_file, "%.*s", LIT(doc_str));*/
+	bold("Type:");
+	DOC_PRINT(" Struct\n\n");
+	doc_location(ident);
+	DOC_PRINT("\n\n");
+/*	if (st->fields.count <= 0) {
+		DOC_PRINT("<aside class=\"notice\">This is an opaque struct</aside>\n\n");
+	} */
 
 	//Markdown
 	if (st->fields.count > 0) {
-		gb_fprintf(doc_file, "\n");
-		gb_fprintf(doc_file, "| Name | Type | |\n");
-		gb_fprintf(doc_file, "|-|-|-|\n");
+		DOC_PRINT("\n");
+		DOC_PRINT("| Name | Type | |\n");
+		DOC_PRINT("|-|-|-|\n");
 		bool last_had_desc = false; 
 		for_array(fi, st->fields) {
 			if(last_had_desc) {
-				gb_fprintf(doc_file, "| | | |\n");
-				gb_fprintf(doc_file, "|-|-|-|\n");
+				DOC_PRINT("| | | |\n");
+				DOC_PRINT("|-|-|-|\n");
 				last_had_desc = false;
 			}
 			ast_node(field, Field, st->fields[fi]);
-			bool skip = true;
 			//Print names
+			bool started = false;
 			for_array(fj, field->names) {
 				AstNode *field_name = field->names[fj];
 				ast_node(field_ident, Ident, field_name);
-				if(field_ident->token.string[0] == '_' && skip_hidden) {
-					continue;
-				} else {
-					skip = false;
+				CHECK_SKIP_CONTINUE(field_ident, skip_hidden);
+
+				if(!started) {
+					DOC_PRINT("| ");
+					started = true;
 				}
 
-				gb_fprintf(doc_file, "| **%.*s** | ", LIT(field_ident->token.string));
+				bold("%.*s", LIT(field_ident->token.string));
+				if(fj != field->names.count-1) {
+					DOC_PRINT(", ");
+				}
 			}
-			
-			if(skip) {
+			if(!started) {
 				continue;
 			}
+
+			DOC_PRINT(" | ");
+
 			//Print type
 			if (field->type != nullptr) {
-				gb_fprintf(doc_file, "<a style=\"color:inherit; text-decoration:inherit\" href=\"");
-				print_anchor(doc_file, field->type);
-				gb_fprintf(doc_file, "\">");
-				print_type(doc_file, field->type, "<br/>");
-				gb_fprintf(doc_file, "</a>");
+				print_anchor_type(field->type);
 			} else {
-				gb_fprintf(doc_file, ":= ");
-				print_type(doc_file, field->default_value);
+				DOC_PRINT(":= ");
+				print_type(field->default_value);
 			}
+			DOC_PRINT(" | ");
 
 			if(field->comment.list.count > 0) {
 				String doc_str = alloc_comment_group_string(heap_allocator(), field->comment);
-				gb_fprintf(doc_file, " | %.*s |", LIT(doc_str));
-				//gb_fprintf(doc_file, "\n");
+				DOC_PRINT("%.*s |", LIT(doc_str));
+			} else {
+				DOC_PRINT(" | ");
 			}
 
 			if(field->docs.list.count > 0) {
+				DOC_PRINT("\n");
 				String doc_str = alloc_comment_group_string(heap_allocator(), field->docs);
-				gb_fprintf(doc_file, " \n**_Description:_**\n\n%.*s\n", LIT(doc_str));
-				gb_fprintf(doc_file, "\n");
+				DOC_PRINT("**_Description:_**\n\n%.*s\n\n", LIT(doc_str));
 				last_had_desc = true;
 			}
-			gb_fprintf(doc_file, "\n");
+			DOC_PRINT("\n");
 		}
-		gb_fprintf(doc_file, "\n\n");
+		DOC_PRINT("\n\n");
 	}
 }
 
-void print_proc_group(gbFile *doc_file, AstNode *name, AstNode *type, bool skip_hidden) {
+void print_proc_group(AstNode *name, AstNode *type, bool skip_hidden) {
 	GB_ASSERT(name->kind == AstNode_Ident);
 	GB_ASSERT(type->kind == AstNode_ProcGroup);
 	ast_node(ident, Ident, name);
-	if(ident->token.string[0] == '_' && skip_hidden) {
-		return;
-	}
+	CHECK_SKIP_RETURN(ident, skip_hidden);
 	ast_node(pg, ProcGroup, type);
 
-	gb_fprintf(doc_file, "## %.*s\n\n", LIT(ident->token.string));
-	gb_fprintf(doc_file, "Location: %.*s:%d\n\n", LIT(ident->token.pos.file), ident->token.pos.line);
+	h2(ident);
+	bold("Type:");
+	DOC_PRINT(" Procedure Group\n\n");
+	doc_location(ident);
+	DOC_PRINT("\n\n");
 
-	gb_fprintf(doc_file, "| |\n");
-	gb_fprintf(doc_file, "|-|\n");
+	DOC_PRINT("| |\n");
+	DOC_PRINT("|-|\n");
 	for_array(arg_index, pg->args) {
 		ast_node(ident, Ident, pg->args[arg_index]);
 		if(ident->token.string[0] == '_') {
 			continue;
 		}
-		gb_fprintf(doc_file, "|");
-		gb_fprintf(doc_file, "<a style=\"color:inherit; text-decoration:inherit\" href=\"");
-		print_anchor(doc_file, pg->args[arg_index]);
-		gb_fprintf(doc_file, "\">");
-		print_type(doc_file, pg->args[arg_index]);
-		gb_fprintf(doc_file, "</a>");
-		gb_fprintf(doc_file, "|\n");
+		DOC_PRINT("|");
+		print_anchor_type(pg->args[arg_index]);
+		DOC_PRINT("|\n");
 	}
 }
 
-void print_proc_type(gbFile *doc_file, AstNode *name, AstNode *type, bool helper, bool skip_hidden) {
-	GB_ASSERT(name->kind == AstNode_Ident);
-	GB_ASSERT(type->kind == AstNode_ProcType);
-	ast_node(ident, Ident, name);
-	if(ident->token.string[0] == '_' && skip_hidden) {
-		return;
-	}
+void print_proc_code(AstNodeIdent *ident, AstNodeProcType *type, bool helper, bool skip_hidden) {
+	CHECK_SKIP_RETURN(ident, skip_hidden);
+	DOC_PRINT("%.*s :: %sproc(", 
+	          LIT(ident->token.string), 
+	          helper ? "#type " : "");
 
-	ast_node(pt, ProcType, type);
-	gb_fprintf(doc_file, "## %.*s\n\n", LIT(ident->token.string));
-	gb_fprintf(doc_file, "Type: Struct\n\n");
-	gb_fprintf(doc_file, "Location: %.*s:%d\n\n", LIT(ident->token.pos.file), ident->token.pos.line);
-
-	ast_node(list, FieldList, pt->params);
-
-	//Code
-	gb_fprintf(doc_file, "```go\n");
-	gb_fprintf(doc_file, "%.*s :: %sproc(", LIT(ident->token.string), helper ? "#type " : "");
+	ast_node(list, FieldList, type->params);
 	if (list->list.count > 0) {
-		gb_fprintf(doc_file, "\n");
+		DOC_PRINT("\n");
 		for_array(list_index, list->list) {
 			ast_node(field, Field, list->list[list_index]);
 			for_array(fj, field->names) {
 				AstNode *field_name = field->names[fj];
 				ast_node(field_ident, Ident, field_name);
 				if(fj == 0) {
-					gb_fprintf(doc_file, "    ");
+					DOC_PRINT("    ");
 				}
-				gb_fprintf(doc_file, "%.*s", LIT(field_ident->token.string));
+				DOC_PRINT("%.*s", LIT(field_ident->token.string));
 				if(fj != field->names.count-1) {
-					gb_fprintf(doc_file, ", ");
+					DOC_PRINT(", ");
 				}
 			}
 
 			if (field->type != nullptr) {
-				gb_fprintf(doc_file, " : ");
-				print_type(doc_file, field->type);
+				DOC_PRINT(" : ");
+				print_type(field->type);
 			} else {
-				gb_fprintf(doc_file, " := ");
-				print_type(doc_file, field->default_value);
+				DOC_PRINT(" := ");
+				print_type(field->default_value);
 			}
 			if(list_index != list->list.count-1) {
-				gb_fprintf(doc_file, ", \n");
+				DOC_PRINT(", \n");
 			}
 		}
-		gb_fprintf(doc_file, "\n");
+		DOC_PRINT("\n");
 	}
-	gb_fprintf(doc_file, ") ");
+	DOC_PRINT(") ");
 
-	if (pt->results != nullptr) {
-		gb_fprintf(doc_file, "-> (");
-		ast_node(results, FieldList, pt->results);
+	if (type->results != nullptr) {
+		DOC_PRINT("-> (");
+		ast_node(results, FieldList, type->results);
 		for_array(list_index, results->list) {
 			ast_node(field, Field, results->list[list_index]);
 				for_array(fj, field->names) {
 					AstNode *field_name = field->names[fj];
 					ast_node(field_ident, Ident, field_name);
-					if(field_ident->token.string[0] == '_') {
+					bool skip = false;
+					CHECK_SKIP_OUT(field_ident, skip_hidden, skip);
+					if(skip) {
 						continue;
 					}
 
-					gb_fprintf(doc_file, "%.*s : ", LIT(field_ident->token.string));
+					DOC_PRINT("%.*s : ", LIT(field_ident->token.string));
 				}
 				if (field->type != nullptr) {
-					print_type(doc_file, field->type);
+					print_type(field->type);
 					if (list_index != results->list.count-1) {
-						gb_fprintf(doc_file, ", ");
+						DOC_PRINT(", ");
 					}
 				}
 		}
-		gb_fprintf(doc_file, ")\n");
+		DOC_PRINT(")\n");
 	} 	
+}
 
-	gb_fprintf(doc_file, "\n```\n\n");
+void print_proc_type(AstNode *name, AstNode *type, bool helper, bool skip_hidden) {
+	GB_ASSERT(name->kind == AstNode_Ident);
+	GB_ASSERT(type->kind == AstNode_ProcType);
+	ast_node(ident, Ident, name);
+	CHECK_SKIP_RETURN(ident, skip_hidden);
+
+	ast_node(pt, ProcType, type);
+	h2(ident);
+
+	bold("Type:");
+	DOC_PRINT(" Procedure ");
+	if(helper) {
+		DOC_PRINT("Type");
+	}
+	DOC_PRINT("\n\n");
+	
+	doc_location(ident);
+	DOC_PRINT("\n\n");
+	
+
+	//Code
+	DOC_PRINT("```go\n");
+	print_proc_code(ident, pt, helper, skip_hidden);
+	DOC_PRINT("\n```\n\n");
 
 	//Markdown
+	ast_node(list, FieldList, pt->params);
 	if (list->list.count > 0) {
-		gb_fprintf(doc_file, "###Parameters;\n\n");
-		gb_fprintf(doc_file, "Parameter | Type\n");
-		gb_fprintf(doc_file, "-- | --\n");
+		h3("Parameters;");
+		DOC_PRINT("| Parameter | Type |\n");
+		DOC_PRINT("|-|-|\n");
 		for_array(list_index, list->list) {
+			DOC_PRINT("| ");
 			ast_node(field, Field, list->list[list_index]);
 			for_array(fj, field->names) {
 				AstNode *field_name = field->names[fj];
 				ast_node(field_ident, Ident, field_name);
-				gb_fprintf(doc_file, "%.*s", LIT(field_ident->token.string));
+				DOC_PRINT("%.*s", LIT(field_ident->token.string));
 				if(fj != field->names.count-1) {
-					gb_fprintf(doc_file, ", ");
+					DOC_PRINT(", ");
 				}
 			}
 
 			if (field->type != nullptr) {
-				gb_fprintf(doc_file, " | ");
-				gb_fprintf(doc_file, "<a style=\"color:inherit; text-decoration:inherit\" href=\"");
-				print_anchor(doc_file, field->type);
-				gb_fprintf(doc_file, "\">");
-				print_type(doc_file, field->type);
-				gb_fprintf(doc_file, "</a>");
+				DOC_PRINT(" | ");
+				print_anchor_type(field->type);
 			} else {
-				gb_fprintf(doc_file, " | := ");
-				print_type(doc_file, field->default_value);
+				DOC_PRINT("| := ");
+				print_type(field->default_value);
 			}
-			gb_fprintf(doc_file, "\n");
+			DOC_PRINT(" |");
+			DOC_PRINT("\n");
 		}
 	}
-	gb_fprintf(doc_file, "\n\n");
+	DOC_PRINT("\n\n");
 
 	if (pt->results != nullptr) {
-		gb_fprintf(doc_file, "###Returns;\n\n");
-		gb_fprintf(doc_file, "| Name | Type |\n");
-		gb_fprintf(doc_file, "|-|-|\n");
+		h3("Returns;");
+		DOC_PRINT("| Name | Type |\n");
+		DOC_PRINT("|-|-|\n");
 		ast_node(results, FieldList, pt->results);
 		for_array(list_index, results->list) {
+			DOC_PRINT("| ");
 			ast_node(field, Field, results->list[list_index]);
-				for_array(fj, field->names) {
-					AstNode *field_name = field->names[fj];
-					ast_node(field_ident, Ident, field_name);
-					if(field_ident->token.string[0] == '_') {
-						continue;
-					}
+			for_array(fj, field->names) {
+				AstNode *field_name = field->names[fj];
+				ast_node(field_ident, Ident, field_name);
+				DOC_PRINT("%.*s ", LIT(field_ident->token.string));
+			}
+			
+			DOC_PRINT("| ");
 
-					gb_fprintf(doc_file, "%.*s ", LIT(field_ident->token.string));
-				}
-				gb_fprintf(doc_file, " | ");
-
-				if (field->type != nullptr) {
-					gb_fprintf(doc_file, "<a style=\"color:inherit; text-decoration:inherit\" href=\"");
-					print_anchor(doc_file, field->type);
-					gb_fprintf(doc_file, "\">");
-					print_type(doc_file, field->type);
-					gb_fprintf(doc_file, "</a>");
-				}
-				gb_fprintf(doc_file, "\n");
+			if (field->type != nullptr) {
+				DOC_PRINT(" | ");
+				print_anchor_type(field->type);
+			}
+			DOC_PRINT(" |\n");
 		}
 	} 	
 
-	gb_fprintf(doc_file, "\n\n");
+	DOC_PRINT("\n\n");
 
 }
 
-void print_enum_type(gbFile *doc_file, AstNode *name, AstNode *type, CommentGroup docs, bool skip_hidden) {
+void print_enum_type(AstNode *name, AstNode *type, CommentGroup docs, bool skip_hidden) {
 	GB_ASSERT(name->kind == AstNode_Ident);
 	GB_ASSERT(type->kind == AstNode_EnumType);
 	ast_node(ident, Ident, name);
-	if(ident->token.string[0] == '_' && skip_hidden) {
-		return;
-	}
+	CHECK_SKIP_RETURN(ident, skip_hidden);
 	ast_node(et, EnumType, type);
-	gb_fprintf(doc_file, "## %.*s\n\n", LIT(ident->token.string));
-	gb_fprintf(doc_file, "Location: %.*s:%d\n\n", LIT(ident->token.pos.file), ident->token.pos.line);
-	gb_fprintf(doc_file, "| Name | Value | Desc |\n");
-	gb_fprintf(doc_file, "|-|-|-|\n");
+	
+	h2(ident);
+	bold("Type:");
+	DOC_PRINT(" Enum\n\n");
+	doc_location(ident);
+	DOC_PRINT("\n\n");
 
+	DOC_PRINT("| Name | Value | Desc |\n");
+	DOC_PRINT("|-|-|-|\n");
 	for_array(fi, et->fields) {
+		DOC_PRINT("| ");
 		AstNode *f = et->fields[fi];
 		switch (f->kind) {
 			case AstNode_Ident :
-				print_type(doc_file, f);
-				gb_fprintf(doc_file, " | ");
-				gb_fprintf(doc_file, " | ");
-				gb_fprintf(doc_file, "\n");
+				print_type(f);
+				DOC_PRINT(" | ");
+				//NOTE(Hoej): Value not printed in this case
+				DOC_PRINT(" | ");
+				//TODO(Hoej): Print docs when added
+				DOC_PRINT(" |");
+				DOC_PRINT("\n");
 				break;
 
 			case_ast_node(fv, FieldValue, f)
-				print_type(doc_file, fv->field);
-				gb_fprintf(doc_file, " | ");
-				gb_fprintf(doc_file, "<a style=\"color:inherit; text-decoration:inherit\" href=\"");
-				print_anchor(doc_file, fv->value);
-				gb_fprintf(doc_file, "\">");
-				print_type(doc_file, fv->value);
-				gb_fprintf(doc_file, "</a>");
-				gb_fprintf(doc_file, " | ");
-				gb_fprintf(doc_file, "\n");
+				print_type(fv->field);
+				DOC_PRINT(" | ");
+				print_anchor_type(fv->value);
+				DOC_PRINT(" | ");
+				//TODO(Hoej): Print docs when added
+				DOC_PRINT(" |");
+				DOC_PRINT("\n");
 			case_end;
 		}
 
 	}
-	gb_fprintf(doc_file, "\n\n");
+	DOC_PRINT("\n\n");
 }
 
-void print_const_type(gbFile *doc_file, AstNode *name, AstNode *type, bool skip_hidden) {
+void print_const_type(AstNode *name, AstNode *type, bool skip_hidden) {
 	GB_ASSERT(name->kind == AstNode_Ident);
 	ast_node(ident, Ident, name);
-	if(ident->token.string[0] == '_' && skip_hidden) {
-		return;
-	}
+	CHECK_SKIP_RETURN(ident, skip_hidden);
 	//String docstr = alloc_comment_group_string(heap_allocator(), docs);
-	//gb_fprintf(doc_file, "(%.*s:%d)\n", LIT(ident->token.pos.file), ident->token.pos.line);
-	//gb_fprintf(doc_file, "%.*s", LIT(docstr));
-	gb_fprintf(doc_file, "`%.*s :: ", LIT(ident->token.string));
-	print_type(doc_file, type);
-	gb_fprintf(doc_file, "`\n\n");
+	//DOC_PRINT("(%.*s:%d)\n", LIT(ident->token.pos.file), ident->token.pos.line);
+	//DOC_PRINT("%.*s", LIT(docstr));
+	DOC_PRINT("`%.*s :: ", LIT(ident->token.string));
+	print_type(type);
+	DOC_PRINT("`\n\n");
 }
 
-void print_union_type(gbFile *doc_file, AstNode *name, AstNode *type, bool skip_hidden) {
+void print_union_type(AstNode *name, AstNode *type, bool skip_hidden) {
 	GB_ASSERT(name->kind == AstNode_Ident);
 	GB_ASSERT(type->kind == AstNode_UnionType);
 	ast_node(ident, Ident, name);
-	if(ident->token.string[0] == '_' && skip_hidden) {
-		return;
-	}
+	CHECK_SKIP_RETURN(ident, skip_hidden);
 	ast_node(ut, UnionType, type);
 
-	gb_fprintf(doc_file, "## %.*s\n", LIT(ident->token.string));
+	h2(ident);
 
-	gb_fprintf(doc_file, "```go\n");
-	gb_fprintf(doc_file, "%.*s :: union {\n", LIT(ident->token.string));
+	DOC_PRINT("```go\n");
+	DOC_PRINT("%.*s :: union {\n", LIT(ident->token.string));
 	for_array(var_index, ut->variants) {
 		AstNode *variant = ut->variants[var_index];
-		gb_fprintf(doc_file, "    ");
-		print_type(doc_file, variant);
+		DOC_PRINT("    ");
+		print_type(variant);
 		if(var_index != ut->variants.count-1) {
-			gb_fprintf(doc_file, ", ");
+			DOC_PRINT(", ");
 		}
-		gb_fprintf(doc_file, "\n");
+		DOC_PRINT("\n");
 	}
-	gb_fprintf(doc_file, "}\n```\n");
+	DOC_PRINT("}\n```\n");
 
 	//Markdown
-	gb_fprintf(doc_file, "Type: Union\n\n");
-	gb_fprintf(doc_file, "Location: %.*s:%d\n\n", LIT(ident->token.pos.file), ident->token.pos.line);
-	gb_fprintf(doc_file, "| Variant | Desc |\n");
-	gb_fprintf(doc_file, "|-|-|\n");
+	bold("Type:");
+	DOC_PRINT(" Union\n\n");
+	doc_location(ident);
+	DOC_PRINT("\n\n");
+	
+	DOC_PRINT("| Variant | Desc |\n");
+	DOC_PRINT("|-|-|\n");
 	for_array(var_index, ut->variants) {
-		gb_fprintf(doc_file, "|");
+		DOC_PRINT("|");
 		AstNode *variant = ut->variants[var_index];
-		gb_fprintf(doc_file, "<a style=\"color:inherit; text-decoration:inherit\" href=\"");
-		print_anchor(doc_file, variant);
-		gb_fprintf(doc_file, "\">");
-		print_type(doc_file, variant);
-		gb_fprintf(doc_file, "</a>");
-		gb_fprintf(doc_file, "|");
-		gb_fprintf(doc_file, " |");
-		gb_fprintf(doc_file, "\n");
+		print_anchor_type(variant);
+		DOC_PRINT("|");
+		DOC_PRINT(" |");
+		DOC_PRINT("\n");
 	}
 }
 
-void print_declaration(gbFile *doc_file, AstNode *decl) {
+void print_declaration(AstNode *decl) {
 	switch (decl->kind) {
 		case_ast_node(vd, ValueDecl, decl);
 			isize max = gb_min(vd->names.count, vd->values.count);
@@ -885,17 +944,17 @@ void print_declaration(gbFile *doc_file, AstNode *decl) {
 				AstNode *value = vd->values[i];
 				switch (value->kind) {
 					case AstNode_StructType : 
-						print_struct_type(doc_file, name, value, vd->docs, true);
+						print_struct_type(name, value, vd->docs, docs_context.skip_hidden);
 						break;
 					case AstNode_EnumType :
-						print_enum_type(doc_file, name, value, vd->docs, true);
+						print_enum_type(name, value, vd->docs, docs_context.skip_hidden);
 						break;
 					case_ast_node(lit, ProcLit, value);
-						print_proc_type(doc_file, name, lit->type, false, true);
+						print_proc_type(name, lit->type, false, docs_context.skip_hidden);
 					case_end;
 
 					case_ast_node(help, HelperType, value);
-						print_proc_type(doc_file, name, help->type, true, true); 
+						print_proc_type(name, help->type, true, docs_context.skip_hidden); 
 					case_end;
 
 					case AstNode_BasicLit :
@@ -904,15 +963,15 @@ void print_declaration(gbFile *doc_file, AstNode *decl) {
 					case AstNode_Ident :
 					case AstNode_SelectorExpr :
 					case AstNode_DynamicArrayType :
-						print_const_type(doc_file, name, value, true); 
+						print_const_type(name, value, docs_context.skip_hidden); 
 						break;
 
 					case AstNode_ProcGroup : 
-						print_proc_group(doc_file, name, value, true);
+						print_proc_group(name, value, docs_context.skip_hidden);
 						break;
 
 					case AstNode_UnionType :
-						print_union_type(doc_file, name, value, true);
+						print_union_type(name, value, docs_context.skip_hidden);
 						break;
 
 					default :
@@ -933,28 +992,27 @@ void document_file(AstFile *file) {
 		
 	Tokenizer *tokenizer = &file->tokenizer;
 	String fullpath = tokenizer->fullpath;
-	gbFile doc_file = {};
 	char doc_name[1024];
 	gb_snprintf(doc_name, 1024, "%.*s.html.md", LIT(filename_from_path(fullpath)));
-	gb_file_create(&doc_file, doc_name);
+	gb_file_create(&docs_context.doc_file, doc_name);
 	gb_printf("------ Parsing: %.*s ------\n", LIT(fullpath));
 #if 0
-	gb_fprintf(&doc_file, "---\n");
-	gb_fprintf(&doc_file, "title: %.*s API Reference\n",  LIT(filename_from_path(fullpath)));
-	gb_fprintf(&doc_file, "\n");
-	gb_fprintf(&doc_file, "language_tabs:\n");
-	gb_fprintf(&doc_file, "  - odin\n");
-	gb_fprintf(&doc_file, "\n");
-	gb_fprintf(&doc_file, "toc_footers:\n");
-	gb_fprintf(&doc_file, "  - <a href='https://github.com/odin-lang/odin'>Generated by the Odin Compiler</a>\n");
-	gb_fprintf(&doc_file, "  - <a href='https://github.com/lord/slate'>Documentation Powered by Slate</a>\n");
-	gb_fprintf(&doc_file, "\n");
-	gb_fprintf(&doc_file, "search: true\n");
-	gb_fprintf(&doc_file, "---");
-	gb_fprintf(&doc_file, "\n");
-	gb_fprintf(&doc_file, "# Notice\n");
-	gb_fprintf(&doc_file, "\n");
-	gb_fprintf(&doc_file, "This is a test for auto generating documentation from odin code via the Odin compiler.\n\n");
+	gb_fprintf(&"---\n");
+	gb_fprintf(&"title: %.*s API Reference\n",  LIT(filename_from_path(fullpath)));
+	gb_fprintf(&"\n");
+	gb_fprintf(&"language_tabs:\n");
+	gb_fprintf(&"  - odin\n");
+	gb_fprintf(&"\n");
+	gb_fprintf(&"toc_footers:\n");
+	gb_fprintf(&"  - <a href='https://github.com/odin-lang/odin'>Generated by the Odin Compiler</a>\n");
+	gb_fprintf(&"  - <a href='https://github.com/lord/slate'>Documentation Powered by Slate</a>\n");
+	gb_fprintf(&"\n");
+	gb_fprintf(&"search: true\n");
+	gb_fprintf(&"---");
+	gb_fprintf(&"\n");
+	gb_fprintf(&"# Notice\n");
+	gb_fprintf(&"\n");
+	gb_fprintf(&"This is a test for auto generating documentation from odin code via the Odin compiler.\n\n");
 #endif
 
 	//Collect Decls
@@ -1015,14 +1073,16 @@ void document_file(AstFile *file) {
 				if (id->file == nullptr) {
 					break;
 				}
-				document_file(id->file);
+				//TODO(Hoej): File stored in ctx now, figure out. 
+				//document_file(id->file);
 			case_end;
 
 			case_ast_node(ed, ExportDecl, decl);
 				if (ed->file == nullptr) {
 					break;
 				}
-				document_file(ed->file);
+				//TODO(Hoej): File stored in ctx now, figure out. 
+				//document_file(ed->file);
 			case_end;
 
 			case AstNode_ForeignImportDecl : 
@@ -1036,36 +1096,36 @@ void document_file(AstFile *file) {
 	}
 
 	if(const_decls.count > 0) {
-		gb_fprintf(&doc_file, "# %.*s - Constants\n\n", LIT(filename_from_path(fullpath)));
+		gb_fprintf(&docs_context.doc_file, "# %.*s - Constants\n\n", LIT(filename_from_path(fullpath)));
 		for_array(decl_index, const_decls) {
 			AstNode *decl = const_decls[decl_index];
-			print_declaration(&doc_file, decl);
+			print_declaration(decl);
 		}
 	}
 	if(type_decls.count > 0) {
-		gb_fprintf(&doc_file, "# %.*s - Types\n\n", LIT(filename_from_path(fullpath)));
+		gb_fprintf(&docs_context.doc_file, "# %.*s - Types\n\n", LIT(filename_from_path(fullpath)));
 		for_array(decl_index, type_decls) {
 			AstNode *decl = type_decls[decl_index];
-			print_declaration(&doc_file, decl);
+			print_declaration(decl);
 		}
 	}
 	if(proc_decls.count > 0) {
-		gb_fprintf(&doc_file, "# %.*s - Procs\n\n", LIT(filename_from_path(fullpath)));
+		gb_fprintf(&docs_context.doc_file, "# %.*s - Procs\n\n", LIT(filename_from_path(fullpath)));
 		for_array(decl_index, proc_decls) {
 			AstNode *decl = proc_decls[decl_index];
-			print_declaration(&doc_file, decl);
+			print_declaration(decl);
 		}
 	}
 	if(enum_decls.count > 0) {
-		gb_fprintf(&doc_file, "# %.*s - Enums\n\n", LIT(filename_from_path(fullpath)));
+		gb_fprintf(&docs_context.doc_file, "# %.*s - Enums\n\n", LIT(filename_from_path(fullpath)));
 		for_array(decl_index, enum_decls) {
 			AstNode *decl = enum_decls[decl_index];
-			print_declaration(&doc_file, decl);
+			print_declaration(decl);
 		}
 	}
 	gb_printf("------ Done! ------\n\n");
-	gb_file_close(&doc_file);
-	gb_fprintf(&doc_file, "------------------------------------\n");
+	gb_file_close(&docs_context.doc_file);
+	DOC_PRINT("------------------------------------\n");
 }
 
 void generate_documentation(Parser *parser) {
