@@ -54,9 +54,9 @@ void ir_write_string(irFileBuffer *f, char const *s) {
 void ir_write_byte(irFileBuffer *f, u8 c) {
 	ir_file_buffer_write(f, &c, 1);
 }
-void ir_write_i128(irFileBuffer *f, i128 i) {
+void ir_write_i64(irFileBuffer *f, i64 i) {
 	char buf[200] = {};
-	String str = i128_to_string(i, buf, gb_size_of(buf)-1);
+	String str = i64_to_string(i, buf, gb_size_of(buf)-1);
 	ir_write_string(f, str);
 }
 
@@ -193,6 +193,33 @@ void ir_print_encoded_global(irFileBuffer *f, String name, bool remove_prefix) {
 	ir_print_escape_string(f, name, true, !remove_prefix);
 }
 
+
+bool ir_print_debug_location(irFileBuffer *f, irModule *m, irValue *v, irProcedure *proc = nullptr) {
+#if 1
+	if (m->generate_debug_info && v != nullptr) {
+		TokenPos pos = v->loc.pos;
+		irDebugInfo *scope = v->loc.debug_scope;
+		i32 id = 0;
+		if (scope != nullptr) {
+			id = scope->id;
+		} else if (proc != nullptr) {
+			if (proc->debug_scope != nullptr) {
+				id = proc->debug_scope->id;
+				pos = proc->entity->token.pos;
+			}
+		}
+		if (id > 0 && pos.line > 0) {
+			ir_fprintf(f, ", !dbg !DILocation(line: %td, column: %td, scope: !%d)", pos.line, pos.column, id);
+			return true;
+		}
+	}
+	return false;
+#else
+	return true;
+#endif
+}
+
+
 void ir_print_type(irFileBuffer *f, irModule *m, Type *t, bool in_struct = false);
 void ir_print_value(irFileBuffer *f, irModule *m, irValue *value, Type *type_hint);
 
@@ -269,8 +296,12 @@ void ir_print_type(irFileBuffer *f, irModule *m, Type *t, bool in_struct) {
 	switch (t->kind) {
 	case Type_Basic:
 		switch (t->Basic.kind) {
-		case Basic_bool:      ir_write_string(f, "i8"); return;
-		case Basic_llvm_bool: ir_write_string(f, "i1"); return;
+		case Basic_llvm_bool: ir_write_string(f, "i1");  return;
+		case Basic_bool:      ir_write_string(f, "i8");  return;
+		case Basic_b8:        ir_write_string(f, "i8");  return;
+		case Basic_b16:       ir_write_string(f, "i16"); return;
+		case Basic_b32:       ir_write_string(f, "i32"); return;
+		case Basic_b64:       ir_write_string(f, "i64"); return;
 
 		case Basic_i8:     ir_write_string(f, "i8");                   return;
 		case Basic_u8:     ir_write_string(f, "i8");                   return;
@@ -280,8 +311,6 @@ void ir_print_type(irFileBuffer *f, irModule *m, Type *t, bool in_struct) {
 		case Basic_u32:    ir_write_string(f, "i32");                  return;
 		case Basic_i64:    ir_write_string(f, "i64");                  return;
 		case Basic_u64:    ir_write_string(f, "i64");                  return;
-		case Basic_i128:   ir_write_string(f, "i128");                 return;
-		case Basic_u128:   ir_write_string(f, "i128");                 return;
 
 		case Basic_rune:   ir_write_string(f, "i32");                  return;
 
@@ -525,19 +554,19 @@ void ir_print_exact_value(irFileBuffer *f, irModule *m, ExactValue value, Type *
 	}
 	case ExactValue_Integer: {
 		if (is_type_pointer(type)) {
-			if (i128_eq(value.value_integer, I128_ZERO)) {
+			if (value.value_integer == 0) {
 				ir_write_string(f, "null");
 			} else {
 				ir_write_string(f, "inttoptr (");
 				ir_print_type(f, m, t_int);
 				ir_write_byte(f, ' ');
-				ir_write_i128(f, value.value_integer);
+				ir_write_i64(f, value.value_integer);
 				ir_write_string(f, " to ");
 				ir_print_type(f, m, t_rawptr);
 				ir_write_string(f, ")");
 			}
 		} else {
-			ir_write_i128(f, value.value_integer);
+			ir_write_i64(f, value.value_integer);
 		}
 		break;
 	}
@@ -962,6 +991,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 		ir_print_type(f, m, type);
 		ir_write_string(f, "* ");
 		ir_print_value(f, m, instr->Store.address, type);
+		ir_print_debug_location(f, m, value);
 		ir_write_byte(f, '\n');
 		break;
 	}
@@ -974,7 +1004,9 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 		ir_print_type(f, m, type);
 		ir_write_string(f, "* ");
 		ir_print_value(f, m, instr->Load.address, type);
-		ir_fprintf(f, ", align %lld\n", type_align_of(m->allocator, type));
+		ir_fprintf(f, ", align %lld", type_align_of(m->allocator, type));
+		ir_print_debug_location(f, m, value);
+		ir_write_byte(f, '\n');
 		break;
 	}
 	case irInstr_ArrayElementPtr: {
@@ -1058,9 +1090,9 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 
 			irValue *edge = instr->Phi.edges[i];
 			irBlock *block = nullptr;
-			if (instr->parent != nullptr &&
-			    i < instr->parent->preds.count) {
-				block = instr->parent->preds[i];
+			if (instr->block != nullptr &&
+			    i < instr->block->preds.count) {
+				block = instr->block->preds[i];
 			}
 
 			ir_write_string(f, "[ ");
@@ -1129,6 +1161,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 	case irInstr_Jump: {;
 		ir_write_string(f, "br label %");
 		ir_print_block_name(f, instr->Jump.block);
+		ir_print_debug_location(f, m, value);
 		ir_write_byte(f, '\n');
 		break;
 	}
@@ -1140,6 +1173,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 		ir_write_string(f, ", ");
 		ir_write_string(f, "label %");   ir_print_block_name(f, instr->If.true_block);
 		ir_write_string(f, ", label %"); ir_print_block_name(f, instr->If.false_block);
+		ir_print_debug_location(f, m, value);
 		ir_write_byte(f, '\n');
 		break;
 	}
@@ -1155,7 +1189,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 			ir_write_byte(f, ' ');
 			ir_print_value(f, m, ret->value, t);
 		}
-
+		ir_print_debug_location(f, m, value);
 		ir_write_byte(f, '\n');
 
 		break;
@@ -1169,6 +1203,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 		ir_print_value(f, m, c->value, c->from);
 		ir_write_string(f, " to ");
 		ir_print_type(f, m, c->to);
+		ir_print_debug_location(f, m, value);
 		ir_write_byte(f, '\n');
 
 		break;
@@ -1222,6 +1257,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 		}
 		ir_write_string(f, str_lit(", "));
 		ir_print_value(f, m, uo->expr, type);
+		ir_print_debug_location(f, m, value);
 		ir_write_byte(f, '\n');
 		break;
 	}
@@ -1311,6 +1347,8 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 		ir_print_value(f, m, bo->left, type);
 		ir_write_string(f, str_lit(", "));
 		ir_print_value(f, m, bo->right, type);
+
+		ir_print_debug_location(f, m, value);
 		ir_write_byte(f, '\n');
 		break;
 	}
@@ -1415,21 +1453,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 		}
 		ir_write_string(f, ")");
 
-		if (m->generate_debug_info) {
-			TokenPos pos = value->loc.pos;
-			irDebugInfo *scope = value->loc.debug_scope;
-			i32 id = 0;
-			irProcedure *proc = instr->parent->parent;
-			if (scope != nullptr) {
-				id = scope->id;
-			} else if (proc->debug_scope != nullptr) {
-				id = proc->debug_scope->id;
-			}
-			if (id > 0) {
-				ir_fprintf(f, ", !dbg !DILocation(line: %td, column: %td, scope: !%d)", pos.line, pos.column, id);
-			}
-		}
-
+		ir_print_debug_location(f, m, value, instr->block->proc);
 		ir_write_string(f, "\n");
 
 		break;
@@ -1446,6 +1470,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 		ir_print_type(f, m, ir_type(instr->Select.false_value));
 		ir_write_byte(f, ' ');
 		ir_print_value(f, m, instr->Select.false_value, ir_type(instr->Select.false_value));
+		ir_print_debug_location(f, m, value);
 		ir_write_byte(f, '\n');
 		break;
 	}
@@ -1803,6 +1828,7 @@ void ir_print_type_name(irFileBuffer *f, irModule *m, irValue *v) {
 
 void print_llvm_ir(irGen *ir) {
 	irModule *m = &ir->module;
+
 	irFileBuffer buf = {}, *f = &buf;
 	ir_file_buffer_init(f, &ir->output_file);
 	defer (ir_file_buffer_destroy(f));
@@ -1812,7 +1838,7 @@ void print_llvm_ir(irGen *ir) {
 		GB_ASSERT(word_bits == 64);
 		ir_write_string(f, "target triple = \"x86_64-apple-macosx10.8\"\n\n");
 	} else if (build_context.ODIN_OS == "windows") {
-		// ir_fprintf(f, "target triple = \"x86%s-pc-windows\"\n\n", word_bits == 64 ? "_64" : "");
+		ir_fprintf(f, "target triple = \"x86%s-pc-windows-msvc\"\n\n", word_bits == 64 ? "_64" : "");
 	}
 
 	ir_print_encoded_local(f, str_lit("..opaque"));
@@ -1855,6 +1881,7 @@ void print_llvm_ir(irGen *ir) {
 
 	bool dll_main_found = false;
 
+	// NOTE(bill): Print foreign prototypes first
 	for_array(member_index, m->members.entries) {
 		auto *entry = &m->members.entries[member_index];
 		irValue *v = entry->value;
@@ -1867,6 +1894,7 @@ void print_llvm_ir(irGen *ir) {
 		}
 	}
 
+	// NOTE(bill): Print procedures with bodies next
 	for_array(member_index, m->members.entries) {
 		auto *entry = &m->members.entries[member_index];
 		irValue *v = entry->value;

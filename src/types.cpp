@@ -6,6 +6,11 @@ enum BasicKind {
 
 	Basic_llvm_bool,
 	Basic_bool,
+	Basic_b8,
+	Basic_b16,
+	Basic_b32,
+	Basic_b64,
+
 	Basic_i8,
 	Basic_u8,
 	Basic_i16,
@@ -14,8 +19,6 @@ enum BasicKind {
 	Basic_u32,
 	Basic_i64,
 	Basic_u64,
-	Basic_i128,
-	Basic_u128,
 
 	Basic_rune,
 
@@ -155,6 +158,7 @@ struct TypeStruct {
 		bool     is_polymorphic;                          \
 		bool     is_poly_specialized;                     \
 		bool     has_proc_default_values;                 \
+		bool     has_named_results;                       \
 		isize    specialization_count;                    \
 		ProcCallingConvention calling_convention;         \
 	})                                                    \
@@ -240,6 +244,10 @@ gb_global Type basic_types[] = {
 	{Type_Basic, {Basic_llvm_bool,         BasicFlag_Boolean,                          1, STR_LIT("llvm bool")}},
 
 	{Type_Basic, {Basic_bool,              BasicFlag_Boolean,                          1, STR_LIT("bool")}},
+	{Type_Basic, {Basic_b8,                BasicFlag_Boolean,                          1, STR_LIT("b8")}},
+	{Type_Basic, {Basic_b16,               BasicFlag_Boolean,                          2, STR_LIT("b16")}},
+	{Type_Basic, {Basic_b32,               BasicFlag_Boolean,                          4, STR_LIT("b32")}},
+	{Type_Basic, {Basic_b64,               BasicFlag_Boolean,                          8, STR_LIT("b64")}},
 
 	{Type_Basic, {Basic_i8,                BasicFlag_Integer,                          1, STR_LIT("i8")}},
 	{Type_Basic, {Basic_u8,                BasicFlag_Integer | BasicFlag_Unsigned,     1, STR_LIT("u8")}},
@@ -249,8 +257,6 @@ gb_global Type basic_types[] = {
 	{Type_Basic, {Basic_u32,               BasicFlag_Integer | BasicFlag_Unsigned,     4, STR_LIT("u32")}},
 	{Type_Basic, {Basic_i64,               BasicFlag_Integer,                          8, STR_LIT("i64")}},
 	{Type_Basic, {Basic_u64,               BasicFlag_Integer | BasicFlag_Unsigned,     8, STR_LIT("u64")}},
-	{Type_Basic, {Basic_i128,              BasicFlag_Integer,                         16, STR_LIT("i128")}},
-	{Type_Basic, {Basic_u128,              BasicFlag_Integer | BasicFlag_Unsigned,    16, STR_LIT("u128")}},
 
 	{Type_Basic, {Basic_rune,              BasicFlag_Integer | BasicFlag_Rune,         4, STR_LIT("rune")}},
 
@@ -296,8 +302,6 @@ gb_global Type *t_i32             = &basic_types[Basic_i32];
 gb_global Type *t_u32             = &basic_types[Basic_u32];
 gb_global Type *t_i64             = &basic_types[Basic_i64];
 gb_global Type *t_u64             = &basic_types[Basic_u64];
-gb_global Type *t_i128            = &basic_types[Basic_i128];
-gb_global Type *t_u128            = &basic_types[Basic_u128];
 
 gb_global Type *t_rune            = &basic_types[Basic_rune];
 
@@ -331,7 +335,6 @@ gb_global Type *t_untyped_undef      = &basic_types[Basic_UntypedUndef];
 gb_global Type *t_u8_ptr       = nullptr;
 gb_global Type *t_int_ptr      = nullptr;
 gb_global Type *t_i64_ptr      = nullptr;
-gb_global Type *t_i128_ptr     = nullptr;
 gb_global Type *t_f64_ptr      = nullptr;
 gb_global Type *t_u8_slice     = nullptr;
 gb_global Type *t_string_slice = nullptr;
@@ -753,12 +756,6 @@ bool is_type_tuple(Type *t) {
 bool is_type_uintptr(Type *t) {
 	if (t->kind == Type_Basic) {
 		return (t->Basic.kind == Basic_uintptr);
-	}
-	return false;
-}
-bool is_type_i128_or_u128(Type *t) {
-	if (t->kind == Type_Basic) {
-		return (t->Basic.kind == Basic_i128) || (t->Basic.kind == Basic_u128);
 	}
 	return false;
 }
@@ -1264,7 +1261,6 @@ Type *default_bit_field_value_type(Type *type) {
 		case 16:  return t_u16;
 		case 32:  return t_u32;
 		case 64:  return t_u64;
-		case 128: return t_u128;
 		default:  GB_PANIC("Too big of a bit size!"); break;
 		}
 	}
@@ -1385,7 +1381,6 @@ Type *union_tag_type(gbAllocator a, Type *u) {
 	case  2: return  t_u16;
 	case  4: return  t_u32;
 	case  8: return  t_u64;
-	case 16: return t_u128;
 	}
 	GB_PANIC("Invalid union_tag_size");
 	return t_uint;
@@ -1787,13 +1782,7 @@ void type_path_pop(TypePath *tp) {
 i64 type_size_of_internal (gbAllocator allocator, Type *t, TypePath *path);
 i64 type_align_of_internal(gbAllocator allocator, Type *t, TypePath *path);
 
-i64 align_formula(i64 size, i64 align) {
-	if (align > 0) {
-		i64 result = size + align-1;
-		return result - result%align;
-	}
-	return size;
-}
+
 
 i64 type_size_of(gbAllocator allocator, Type *t) {
 	if (t == nullptr) {

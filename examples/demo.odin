@@ -4,6 +4,7 @@ import "core:mem.odin"
 import "core:bits.odin"
 import "core:hash.odin"
 import "core:math.odin"
+import "core:math/rand.odin"
 import "core:os.odin"
 import "core:raw.odin"
 import "core:sort.odin"
@@ -18,6 +19,7 @@ when ODIN_OS == "windows" {
 	import win32 "core:sys/windows.odin"
 }
 
+@(link_name="general_stuff")
 general_stuff :: proc() {
 	fmt.println("# general_stuff");
 	{ // `do` for inline statmes rather than block
@@ -73,6 +75,23 @@ general_stuff :: proc() {
 
 		for in 0..2  {} // 0, 1
 		for in 0...2 {} // 0, 1, 2
+	}
+
+	{ // Multiple sized booleans
+
+		x0: bool; // default
+		x1: b8  = true;
+		x2: b16 = false;
+		x3: b32 = true;
+		x4: b64 = false;
+
+		fmt.printf("x1: %T = %v;\n", x1, x1);
+		fmt.printf("x2: %T = %v;\n", x2, x2);
+		fmt.printf("x3: %T = %v;\n", x3, x3);
+		fmt.printf("x4: %T = %v;\n", x4, x4);
+
+		// Having specific sized booleans is very useful when dealing with foreign code
+		// and to enforce specific alignment for a boolean, especially within a struct
 	}
 }
 
@@ -349,11 +368,7 @@ parametric_polymorphism :: proc() {
 	}
 
 	copy_slice :: proc(dst, src: []$T) -> int {
-		n := min(len(dst), len(src));
-		if n > 0 {
-			mem.copy(&dst[0], &src[0], n*size_of(T));
-		}
-		return n;
+		return mem.copy(&dst[0], &src[0], n*size_of(T));
 	}
 
 	double_params :: proc(a: $A, b: $B) -> A {
@@ -596,7 +611,7 @@ array_programming :: proc() {
 		cross :: proc(a, b: Vector3) -> Vector3 {
 			i := swizzle(a, 1, 2, 0) * swizzle(b, 2, 0, 1);
 			j := swizzle(a, 2, 0, 1) * swizzle(b, 1, 2, 0);
-			return Vector3(i - j);
+			return i - j;
 		}
 
 		blah :: proc(a: Vector3) -> f32 {
@@ -609,14 +624,56 @@ array_programming :: proc() {
 	}
 }
 
+
+using println in import "core:fmt.odin"
+
+using_in :: proc() {
+	using print in fmt;
+
+	println("Hellope1");
+	print("Hellope2\n");
+
+	Foo :: struct {
+		x, y: int,
+		b: bool,
+	}
+	f: Foo;
+	f.x, f.y = 123, 321;
+	println(f);
+	using x, y in f;
+	f.x, f.y = 456, 654;
+	println(f);
+}
+
+named_proc_parameters :: proc() {
+	foo0 :: proc() -> int {
+		return 123;
+	}
+	foo1 :: proc() -> (a: int) {
+		a = 123;
+		return;
+	}
+	foo2 :: proc() -> (a, b: int) {
+		// Named return values act like variables within the scope
+		a = 321;
+		b = 567;
+		return b, a;
+	}
+	fmt.println("foo0 =", foo0()); // 123
+	fmt.println("foo1 =", foo1()); // 123
+	fmt.println("foo2 =", foo2()); // 567 321
+}
+
 main :: proc() {
-	when false {
 		general_stuff();
 		default_struct_values();
+	when false {
 		union_type();
 		parametric_polymorphism();
 		threading_example();
 		array_programming();
 	}
+		using_in();
+		named_proc_parameters();
 }
 

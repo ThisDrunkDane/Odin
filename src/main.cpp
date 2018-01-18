@@ -1,16 +1,21 @@
 // #define NO_ARRAY_BOUNDS_CHECK
+// #define NO_POINTER_ARITHMETIC
 
 #include "common.cpp"
 #include "timings.cpp"
 #include "build_settings.cpp"
 #include "tokenizer.cpp"
-#include "parser.cpp"
 #include "exact_value.cpp"
+
+#include "parser.hpp"
+#include "checker.hpp"
+
+#include "parser.cpp"
+#include "docs.cpp"
 #include "checker.cpp"
 #include "ir.cpp"
 #include "ir_opt.cpp"
 #include "ir_print.cpp"
-#include "docs.cpp"
 
 #if defined(GB_SYSTEM_WINDOWS)
 // NOTE(bill): 'name' is used in debugging and profiling modes
@@ -37,6 +42,7 @@ i32 system_exec_command_line_app(char *name, bool is_silent, char *fmt, ...) {
 	// gb_printf_err("%.*s\n", cast(int)cmd_len, cmd_line);
 
 	tmp = gb_temp_arena_memory_begin(&string_buffer_arena);
+	defer (gb_temp_arena_memory_end(tmp));
 
 	cmd = string_to_string16(string_buffer_allocator, make_string(cast(u8 *)cmd_line, cmd_len-1));
 
@@ -54,7 +60,6 @@ i32 system_exec_command_line_app(char *name, bool is_silent, char *fmt, ...) {
 		exit_code = -1;
 	}
 
-	gb_temp_arena_memory_end(tmp);
 	return exit_code;
 }
 #elif defined(GB_SYSTEM_OSX) || defined(GB_SYSTEM_UNIX)
@@ -207,6 +212,7 @@ enum BuildFlagKind {
 	BuildFlag_Debug,
 	BuildFlag_CrossCompile,
 	BuildFlag_CrossLibDir,
+	BuildFlag_NoBoundsCheck,
 
 	BuildFlag_COUNT,
 };
@@ -245,6 +251,7 @@ bool parse_build_flags(Array<String> args) {
 	add_flag(&build_flags, BuildFlag_Debug,             str_lit("debug"),           BuildFlagParam_None);
 	add_flag(&build_flags, BuildFlag_CrossCompile,      str_lit("cross-compile"),   BuildFlagParam_String);
 	add_flag(&build_flags, BuildFlag_CrossLibDir,       str_lit("cross-lib-dir"),   BuildFlagParam_String);
+	add_flag(&build_flags, BuildFlag_NoBoundsCheck,     str_lit("no-bounds-check"), BuildFlagParam_None);
 
 
 	GB_ASSERT(args.count >= 3);
@@ -361,7 +368,7 @@ bool parse_build_flags(Array<String> args) {
 						if (ok) switch (bf.kind) {
 						case BuildFlag_OptimizationLevel:
 							GB_ASSERT(value.kind == ExactValue_Integer);
-							build_context.optimization_level = cast(i32)i128_to_i64(value.value_integer);
+							build_context.optimization_level = cast(i32)value.value_integer;
 							break;
 						case BuildFlag_ShowTimings:
 							GB_ASSERT(value.kind == ExactValue_Invalid);
@@ -369,7 +376,7 @@ bool parse_build_flags(Array<String> args) {
 							break;
 						case BuildFlag_ThreadCount: {
 							GB_ASSERT(value.kind == ExactValue_Integer);
-							isize count = cast(isize)i128_to_i64(value.value_integer);
+							isize count = cast(isize)value.value_integer;
 							if (count <= 0) {
 								gb_printf_err("%.*s expected a positive non-zero number, got %.*s", LIT(name), LIT(param));
 								build_context.thread_count = 0;
@@ -386,12 +393,10 @@ bool parse_build_flags(Array<String> args) {
 						case BuildFlag_CrossCompile: {
 							GB_ASSERT(value.kind == ExactValue_String);
 							cross_compile_target = value.value_string;
-#ifdef GB_SYSTEM_UNIX
-#ifdef GB_ARCH_64_BIT
+#if defined(GB_SYSTEM_UNIX) && defined(GB_ARCH_64_BIT)
 							if (str_eq_ignore_case(cross_compile_target, str_lit("Essence"))) {
 
 							} else
-#endif
 #endif
 							{
 								gb_printf_err("Unsupported cross compilation target '%.*s'\n", LIT(cross_compile_target));
@@ -501,6 +506,10 @@ bool parse_build_flags(Array<String> args) {
 
 						case BuildFlag_Debug:
 							build_context.debug = true;
+							break;
+
+						case BuildFlag_NoBoundsCheck:
+							build_context.no_bounds_check = true;
 							break;
 						}
 					}
