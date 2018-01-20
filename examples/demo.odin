@@ -665,15 +665,15 @@ named_proc_parameters :: proc() {
 }
 
 main :: proc() {
+	when true {
 		general_stuff();
 		default_struct_values();
-	when false {
 		union_type();
 		parametric_polymorphism();
 		threading_example();
 		array_programming();
-	}
 		using_in();
 		named_proc_parameters();
+	}
 }
 
