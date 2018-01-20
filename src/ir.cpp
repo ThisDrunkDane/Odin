@@ -889,6 +889,9 @@ String ir_get_global_name(irModule *m, irValue *v) {
 
 void ir_add_entity_name(irModule *m, Entity *e, String name) {
 	GB_ASSERT(name.len > 0);
+	if (e != nullptr && e->kind == Entity_TypeName) {
+		e->TypeName.ir_mangled_name = name;
+	}
 	map_set(&m->entity_names, hash_entity(e), name);
 }
 
@@ -6141,7 +6144,7 @@ void ir_build_constant_value_decl(irProcedure *proc, AstNodeValueDecl *vd) {
 			String name = make_string(name_text, name_len-1);
 
 			irValue *value = ir_value_type_name(m->allocator, name, e->type);
-			map_set(&m->entity_names, hash_entity(e), name);
+			ir_add_entity_name(m, e, name);
 			ir_gen_global_type_name(m, e, name);
 		} else if (e->kind == Entity_Procedure) {
 			CheckerInfo *info = proc->module->info;
@@ -8076,8 +8079,11 @@ void ir_setup_type_info_data(irProcedure *proc) { // NOTE(bill): Setup type_info
 
 				i64 tag_size   = union_tag_size(a, t);
 				i64 tag_offset = align_formula(t->Union.variant_block_size, tag_size);
-				ir_emit_store(proc, tag_offset_ptr, ir_const_uintptr(a, tag_offset));
-				ir_emit_store(proc, tag_type_ptr,   ir_type_info(proc, union_tag_type(a, t)));
+
+				if (tag_size > 0) {
+					ir_emit_store(proc, tag_offset_ptr, ir_const_uintptr(a, tag_offset));
+					ir_emit_store(proc, tag_type_ptr,   ir_type_info(proc, union_tag_type(a, t)));
+				}
 			}
 
 			break;
