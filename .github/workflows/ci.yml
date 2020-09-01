@@ -2,9 +2,7 @@ name: CI
 on: 
   release:    
     types: [published]
-  push:
-  pull_request:
-    
+
 jobs:
   build_linux:
     runs-on: ubuntu-latest
@@ -85,6 +83,21 @@ jobs:
          uses: actions/download-artifact@v1
          with:
            name: windows_artifacts
-       - name: List files
-         run: ls windows_artifacts
+       - name: Zip Windows
+         run: |
+            filename="odin-windows-amd64-${{github.ref}}.zip"
+            7z a -bd "output/$filename" -r windows_artifacts/
+       - name: Get release url
+         id: get_release
+         uses: bruceadams/get-release@v1.2.0
+       - name: Upload Release Asset
+         id: upload-release-asset 
+         uses: actions/upload-release-asset@v1
+         env:
+           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+         with:
+           upload_url: ${{ steps.get_release.outputs.upload_url }}
+           asset_path: output/odin-windows-amd64-${{github.ref}}.zip
+           asset_name: odin-windows-amd64-${{github.ref}}.zip
+           asset_content_type: application/zip
 
