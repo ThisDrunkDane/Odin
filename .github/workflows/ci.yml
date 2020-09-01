@@ -1,7 +1,7 @@
 name: CI
 on: 
   release:    
-    types: [published, created, edited]
+    types: [published]
   push:
   pull_request:
     
