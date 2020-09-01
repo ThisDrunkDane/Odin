@@ -81,13 +81,17 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+       - name: Extract tag name
+         shell: bash
+         run: echo "##[set-output name=tag;]$(echo ${GITHUB_REF#refs/tags/})"
+         id: extract_tag
        - name: Download Windows artifacts
          uses: actions/download-artifact@v1
          with:
            name: windows_artifacts
        - name: Zip Windows
          run: |
-            filename="odin-windows-amd64-${{github.ref}}.zip"
+            filename="odin-windows-amd64-${{steps.extract_tag.outputs.tag}}.zip"
             7z a -bd "output/$filename" -r windows_artifacts/
        - name: Get release url
          id: get_release
@@ -97,7 +101,7 @@ jobs:
          uses: actions/upload-release-asset@v1
          with:
            upload_url: ${{ steps.get_release.outputs.upload_url }}
-           asset_path: output/odin-windows-amd64-${{github.ref}}.zip
-           asset_name: odin-windows-amd64-${{github.ref}}.zip
+           asset_path: output/odin-windows-amd64-${{steps.extract_tag.outputs.tag}}.zip
+           asset_name: odin-windows-amd64-${{steps.extract_tag.outputs.tag}}.zip
            asset_content_type: application/zip
 
