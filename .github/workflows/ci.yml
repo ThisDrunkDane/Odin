@@ -4,7 +4,7 @@ on:
     types: [published]
 
 jobs:
-  build_linux:
+  build_ubuntu:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
@@ -16,6 +16,20 @@ jobs:
         run: ./odin run examples/demo/demo.odin
       - name: Odin check
         run: ./odin check examples/demo/demo.odin -vet
+      - if: github.event_name == 'release'
+        name: Copy artifacts
+        run: |
+          mkdir dist
+          cp odin dist
+          cp -r shared dist
+          cp -r core dist
+          cp -r examples dist
+      - if: github.event_name == 'release'
+        name: Upload artifact
+        uses: actions/upload-artifact@v1
+        with:
+          name: ubuntu_artifacts
+          path: dist
   build_macOS:
     runs-on: macOS-latest
     steps:
@@ -31,6 +45,20 @@ jobs:
         run: ./odin run examples/demo/demo.odin
       - name: Odin check
         run: ./odin check examples/demo/demo.odin -vet
+      - if: github.event_name == 'release'
+        name: Copy artifacts
+        run: |
+          mkdir dist
+          cp odin dist
+          cp -r shared dist
+          cp -r core dist
+          cp -r examples dist
+      - if: github.event_name == 'release'
+        name: Upload artifact
+        uses: actions/upload-artifact@v1
+        with:
+          name: macos_artifacts
+          path: dist
   build_windows:
     runs-on: windows-latest
     steps:
@@ -76,7 +104,7 @@ jobs:
           path: dist
   add_release_artifacts:
     runs-on: [ubuntu-latest]
-    needs: [build_windows, build_macOS, build_linux]
+    needs: [build_windows, build_macOS, build_ubuntu]
     if: github.event_name == 'release'
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -89,19 +117,44 @@ jobs:
          uses: actions/download-artifact@v1
          with:
            name: windows_artifacts
-       - name: Zip Windows
+       - name: Download Ubuntu artifacts
+         uses: actions/download-artifact@v1
+         with:
+           name: ubuntu_artifacts
+       - name: Download macOS artifacts
+         uses: actions/download-artifact@v1
+         with:
+           name: macos_artifacts
+       - name: Zip artifacts
          run: |
             filename="odin-windows-amd64-${{steps.extract_tag.outputs.tag}}.zip"
             7z a -bd "output/$filename" -r windows_artifacts/
+            filename="odin-ubuntu-amd64-${{steps.extract_tag.outputs.tag}}.zip"
+            7z a -bd "output/$filename" -r ubuntu_artifacts/
+            filename="odin-macos-amd64-${{steps.extract_tag.outputs.tag}}.zip"
+            7z a -bd "output/$filename" -r macos_artifacts/
        - name: Get release url
          id: get_release
          uses: bruceadams/get-release@v1.2.0
-       - name: Upload Release Asset
-         id: upload-release-asset 
+       - name: Upload Windows
          uses: actions/upload-release-asset@v1
          with:
            upload_url: ${{ steps.get_release.outputs.upload_url }}
            asset_path: output/odin-windows-amd64-${{steps.extract_tag.outputs.tag}}.zip
            asset_name: odin-windows-amd64-${{steps.extract_tag.outputs.tag}}.zip
+           asset_content_type: application/zip
+       - name: Upload Ubuntu
+         uses: actions/upload-release-asset@v1
+         with:
+           upload_url: ${{ steps.get_release.outputs.upload_url }}
+           asset_path: output/odin-ubuntu-amd64-${{steps.extract_tag.outputs.tag}}.zip
+           asset_name: odin-ubuntu-amd64-${{steps.extract_tag.outputs.tag}}.zip
+           asset_content_type: application/zip
+       - name: Upload macOS
+         uses: actions/upload-release-asset@v1
+         with:
+           upload_url: ${{ steps.get_release.outputs.upload_url }}
+           asset_path: output/odin-macos-amd64-${{steps.extract_tag.outputs.tag}}.zip
+           asset_name: odin-macos-amd64-${{steps.extract_tag.outputs.tag}}.zip
            asset_content_type: application/zip
 
