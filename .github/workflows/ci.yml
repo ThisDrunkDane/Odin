@@ -128,11 +128,11 @@ jobs:
        - name: Zip artifacts
          run: |
             filename="odin-windows-amd64-${{steps.extract_tag.outputs.tag}}.zip"
-            7z a -bd "output/$filename" -r windows_artifacts/
+            7z a -bd "output/$filename" -r ./windows_artifacts/*
             filename="odin-ubuntu-amd64-${{steps.extract_tag.outputs.tag}}.zip"
-            7z a -bd "output/$filename" -r ubuntu_artifacts/
+            7z a -bd "output/$filename" -r ./ubuntu_artifacts/*
             filename="odin-macos-amd64-${{steps.extract_tag.outputs.tag}}.zip"
-            7z a -bd "output/$filename" -r macos_artifacts/
+            7z a -bd "output/$filename" -r ./macos_artifacts/*
        - name: Get release url
          id: get_release
          uses: bruceadams/get-release@v1.2.0
