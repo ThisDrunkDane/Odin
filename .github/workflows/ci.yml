@@ -1,6 +1,10 @@
 name: CI
-on: [push, pull_request]
-
+on: 
+  release:    
+    types: [published, created, edited]
+  push:
+  pull_request:
+    
 jobs:
   build_linux:
     runs-on: ubuntu-latest
@@ -55,5 +59,29 @@ jobs:
         run: |
           call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat
           odin check examples/demo/demo.odin -vet
-
+      - name: Copy artifacts
+        if: github.event_name == 'release'
+        run: |
+          mkdir dist
+          cp odin dist
+          cp -r shared dist
+          cp -r core dist
+          cp -r examples dist
+      - name: Upload artifact
+        if: github.event_name == 'release'
+        uses: actions/upload-artifact@v1
+        with:
+          name: macos_artifacts
+          path: dist
+  add_release_artifacts:
+    runs-on: [ubuntu-latest]
+    needs: [build_windows, build_macOS, build_linux]
+    if: github.event_name == 'release'
+    steps:
+       - name: Download Windows artifacts
+         uses: actions/download-artifact@v1
+         with:
+           name: windows_artifacts
+       - name: List files
+         run: ls windows_artifacts
 
