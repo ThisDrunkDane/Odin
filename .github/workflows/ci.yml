@@ -59,19 +59,22 @@ jobs:
         run: |
           call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat
           odin check examples/demo/demo.odin -vet
-      - name: Copy artifacts
-        if: github.event_name == 'release'
+      - if: github.event_name == 'release'
+        name: Copy artifacts
         run: |
+          rm bin/llvm/windows/LLVM-C.lib
           mkdir dist
-          cp odin dist
+          cp odin.exe dist
+          cp LLVM-C.dll dist
           cp -r shared dist
           cp -r core dist
+          cp -r bin dist
           cp -r examples dist
-      - name: Upload artifact
-        if: github.event_name == 'release'
+      - if: github.event_name == 'release'
+        name: Upload artifact
         uses: actions/upload-artifact@v1
         with:
-          name: macos_artifacts
+          name: windows_artifacts
           path: dist
   add_release_artifacts:
     runs-on: [ubuntu-latest]
