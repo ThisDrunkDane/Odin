@@ -96,22 +96,21 @@ class TestCollection:
         for f in files:
             self.test_files.append(TestFile(root, f))
 
+    def run(self):
+        for test in self.test_files:
+            print(f"--{test.file_name} ...", end=' ')
+            test.run()
+            if test.exit_code > 0:
+                print(f'{Fore.RED}FAIL ({test.exit_code}){Style.RESET_ALL}')
+            else:
+                print(f'{Fore.GREEN}SUCCESS{Style.RESET_ALL}')
+
 
 def get_total_test_files(test_collections: [TestCollection]) -> int:
     total: int = 0
     for col in test_collections:
         total += len(col.test_files)
     return total
-
-
-def run_collection_tests(col: TestCollection):
-    for test in col.test_files:
-        print(f"--{test.file_name} ...", end=' ')
-        test.run()
-        if test.exit_code > 0:
-            print(f'{Fore.RED}FAIL ({test.exit_code}){Style.RESET_ALL}')
-        else:
-            print(f'{Fore.GREEN}SUCCESS{Style.RESET_ALL}')
 
 
 def print_failed_summary(failed_tests):
@@ -151,7 +150,7 @@ def main():
 
     for col in test_collections:
         print(f'Running test collection in {col.root_path}')
-        run_collection_tests(col)
+        col.run()
         print()
 
     failed_tests = [f for col in test_collections for f in col.test_files if f.exit_code > 0]
@@ -161,7 +160,7 @@ def main():
         print(f'{Fore.RED}{len(failed_tests)} out of {total_tests} tests Failed! Do better!{Style.RESET_ALL}')
         exit(1)
     else:
-        print(f'{Fore.GREEN}All tests passed! Good job!{Style.RESET_ALL}')
+        print(f'{Fore.GREEN}All {total_tests} tests passed! Good job!{Style.RESET_ALL}')
         exit(0)
 
 
