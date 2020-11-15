@@ -70,7 +70,8 @@ error_code_map = {
     0xC0000420: 'ASSERTION_FAILURE',
     0xC015000F: 'SXS_EARLY_DEACTIVATION',
     0xC0150010: 'SXS_INVALID_DEACTIVATION',
- }
+}
+
 
 class TestFile:
     def __init__(self, root: str, file_name: str):
@@ -118,7 +119,8 @@ def print_failed_summary(failed_tests):
     for ft in failed_tests:
         print(f"-- {ft.file_name}")
         print(f'Error Code: ', end='')
-        print(f'{Fore.RED}{ft.exit_code}{Style.RESET_ALL} -> {error_code_map.get(ft.exit_code, "No translation found")}')
+        print(
+            f'{Fore.RED}{ft.exit_code}{Style.RESET_ALL} -> {error_code_map.get(ft.exit_code, "No translation found")}')
         print(f'Output: ', end='')
         if len(ft.output) > 0:
             print(f'\n{Style.DIM}== START OF OUTPUT =={Style.RESET_ALL}')
