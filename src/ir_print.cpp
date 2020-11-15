@@ -76,7 +76,6 @@ void ir_write_u64(irFileBuffer *f, u64 i) {
 }
 void ir_write_big_int(irFileBuffer *f, BigInt const &x, Type *type, bool swap_endian) {
 	if (x.len == 2) {
-		gbAllocator a = heap_allocator(); // TODO(bill): Change this allocator
 		u64 words[2] = {};
 		BigInt y = x;
 		if (swap_endian) {
@@ -88,9 +87,8 @@ void ir_write_big_int(irFileBuffer *f, BigInt const &x, Type *type, bool swap_en
 			y.d.words = words;
 		}
 
-		String s = big_int_to_string(a, &y, 10);
+		String s = big_int_to_string(temporary_allocator(), &y, 10);
 		ir_write_string(f, s);
-		gb_free(a, s.text);
 	} else {
 		i64 i = 0;
 		if (x.neg) {
@@ -296,7 +294,7 @@ void ir_print_alignment_prefix_hack(irFileBuffer *f, i64 alignment) {
 
 
 void ir_print_proc_results(irFileBuffer *f, irModule *m, Type *t) {
-	set_procedure_abi_types(heap_allocator(), t);
+	set_procedure_abi_types(t);
 
 	GB_ASSERT(is_type_proc(t));
 	t = base_type(t);
@@ -325,7 +323,7 @@ void ir_print_proc_results(irFileBuffer *f, irModule *m, Type *t) {
 
 
 void ir_print_proc_type_without_pointer(irFileBuffer *f, irModule *m, Type *t) {
-	set_procedure_abi_types(heap_allocator(), t);
+	set_procedure_abi_types(t);
 
 	i64 word_bits = 8*build_context.word_size;
 	t = base_type(t);
@@ -2189,7 +2187,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 		irInstrCall *call = &instr->Call;
 		Type *proc_type = base_type(ir_type(call->value));
 		GB_ASSERT(is_type_proc(proc_type));
-		set_procedure_abi_types(heap_allocator(), proc_type);
+		set_procedure_abi_types(proc_type);
 
 		bool is_c_vararg = proc_type->Proc.c_vararg;
 		Type *result_type = call->type;
@@ -2396,7 +2394,7 @@ void ir_print_instr(irFileBuffer *f, irModule *m, irValue *value) {
 
 
 void ir_print_proc(irFileBuffer *f, irModule *m, irProcedure *proc) {
-	set_procedure_abi_types(heap_allocator(), proc->type);
+	set_procedure_abi_types(proc->type);
 
 	if (proc->body == nullptr) {
 		ir_write_str_lit(f, "declare ");

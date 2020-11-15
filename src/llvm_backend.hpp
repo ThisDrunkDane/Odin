@@ -74,6 +74,7 @@ struct lbModule {
 	gbMutex mutex;
 
 	Map<LLVMTypeRef> types; // Key: Type *
+	i32 internal_type_level;
 
 	Map<lbValue>  values;           // Key: Entity *
 	StringMap<lbValue>  members;
@@ -83,6 +84,7 @@ struct lbModule {
 	StringMap<LLVMValueRef> const_strings;
 
 	Map<lbProcedure *> anonymous_proc_lits; // Key: Ast *
+	Map<struct lbFunctionType *> function_type_map; // Key: Type *
 
 	u32 global_array_index;
 	u32 global_generated_index;
@@ -199,6 +201,7 @@ struct lbProcedure {
 	bool         is_entry_point;
 	bool         is_startup;
 
+	lbFunctionType *abi_function_type;
 
 	LLVMValueRef    value;
 	LLVMBuilderRef  builder;
@@ -301,7 +304,7 @@ lbAddr lb_add_local(lbProcedure *p, Type *type, Entity *e=nullptr, bool zero_ini
 
 void lb_add_foreign_library_path(lbModule *m, Entity *e);
 
-lbValue lb_typeid(lbModule *m, Type *type, Type *typeid_type=t_typeid);
+lbValue lb_typeid(lbModule *m, Type *type);
 
 lbValue lb_address_from_load_or_generate_local(lbProcedure *p, lbValue value);
 lbValue lb_address_from_load(lbProcedure *p, lbValue value);

@@ -89,7 +89,7 @@ Type *           check_init_variable    (CheckerContext *c, Entity *e, Operand *
 Type *type_to_abi_compat_param_type(gbAllocator a, Type *original_type, ProcCallingConvention cc);
 Type *type_to_abi_compat_result_type(gbAllocator a, Type *original_type, ProcCallingConvention cc);
 bool abi_compat_return_by_pointer(gbAllocator a, ProcCallingConvention cc, Type *abi_return_type);
-void set_procedure_abi_types(gbAllocator a, Type *type);
+void set_procedure_abi_types(Type *type);
 void check_assignment_error_suggestion(CheckerContext *c, Operand *o, Type *type);
 
 
@@ -267,7 +267,7 @@ bool find_or_generate_polymorphic_procedure(CheckerContext *c, Entity *base_enti
 
 	CheckerContext nctx = *c;
 
-	Scope *scope = create_scope(base_entity->scope, a);
+	Scope *scope = create_scope(base_entity->scope);
 	scope->flags |= ScopeFlag_Proc;
 	nctx.scope = scope;
 	nctx.allow_polymorphic_types = true;
@@ -366,7 +366,7 @@ bool find_or_generate_polymorphic_procedure(CheckerContext *c, Entity *base_enti
 	u64 tags = base_entity->Procedure.tags;
 	Ast *ident = clone_ast(base_entity->identifier);
 	Token token = ident->Ident.token;
-	DeclInfo *d = make_decl_info(nctx.allocator, scope, old_decl->parent);
+	DeclInfo *d = make_decl_info(scope, old_decl->parent);
 	d->gen_proc_type = final_proc_type;
 	d->type_expr = pl->type;
 	d->proc_lit = proc_lit;
@@ -1012,7 +1012,7 @@ bool is_polymorphic_type_assignable(CheckerContext *c, Type *poly, Type *source,
 			}
 
 			if (modify_type) {
-				set_procedure_abi_types(c->allocator, source);
+				set_procedure_abi_types(source);
 			}
 
 			return true;
@@ -1834,10 +1834,6 @@ void check_comparison(CheckerContext *c, Operand *x, Operand *y, TokenKind op) {
 
 	gbString err_str = nullptr;
 
-	defer (if (err_str != nullptr) {
-		gb_string_free(err_str);
-	});
-
 	if (check_is_assignable_to(c, x, y->type) ||
 	    check_is_assignable_to(c, y, x->type)) {
 		Type *err_type = x->type;
@@ -1867,8 +1863,8 @@ void check_comparison(CheckerContext *c, Operand *x, Operand *y, TokenKind op) {
 			}
 			gbString type_string = type_to_string(err_type);
 			defer (gb_string_free(type_string));
-			err_str = gb_string_make(c->allocator,
-			                         gb_bprintf("operator '%.*s' not defined for type '%s'", LIT(token_strings[op]), type_string));
+			err_str = gb_string_make(temporary_allocator(),
+				gb_bprintf("operator '%.*s' not defined for type '%s'", LIT(token_strings[op]), type_string));
 		}
 	} else {
 		gbString xt, yt;
@@ -1882,8 +1878,7 @@ void check_comparison(CheckerContext *c, Operand *x, Operand *y, TokenKind op) {
 		} else {
 			yt = type_to_string(y->type);
 		}
-		err_str = gb_string_make(c->allocator,
-		                         gb_bprintf("mismatched types '%s' and '%s'", xt, yt));
+		err_str = gb_string_make(temporary_allocator(), gb_bprintf("mismatched types '%s' and '%s'", xt, yt));
 		gb_string_free(yt);
 		gb_string_free(xt);
 	}
@@ -2979,8 +2974,7 @@ void convert_to_typed(CheckerContext *c, Operand *operand, Type *target_type) {
 	case Type_Union:
 		if (!is_operand_nil(*operand) && !is_operand_undef(*operand)) {
 			isize count = t->Union.variants.count;
-			ValidIndexAndScore *valids = gb_alloc_array(c->allocator, ValidIndexAndScore, count);
-			defer (gb_free(c->allocator, valids));
+			ValidIndexAndScore *valids = gb_alloc_array(temporary_allocator(), ValidIndexAndScore, count);
 			isize valid_count = 0;
 			isize first_success_index = -1;
 			for_array(i, t->Union.variants) {
@@ -4343,7 +4337,6 @@ bool check_builtin_procedure(CheckerContext *c, Operand *operand, Ast *call, i32
 
 		add_type_info_type(c, t);
 
-		t = base_type(t);
 		if (o.mode != Addressing_Type) {
 			error(expr, "Expected a type for 'typeid_of'");
 			return false;
@@ -4351,6 +4344,7 @@ bool check_builtin_procedure(CheckerContext *c, Operand *operand, Ast *call, i32
 
 		operand->mode = Addressing_Value;
 		operand->type = t_typeid;
+		operand->value = exact_value_typeid(t);
 		break;
 	}
 
@@ -4739,7 +4733,7 @@ bool check_builtin_procedure(CheckerContext *c, Operand *operand, Ast *call, i32
 			gb_string_free(type_str);
 			return false;
 		}
-		gbAllocator a = c->allocator;
+		gbAllocator a = permanent_allocator();
 
 		Type *tuple = alloc_type_tuple();
 
@@ -5356,7 +5350,7 @@ bool check_builtin_procedure(CheckerContext *c, Operand *operand, Ast *call, i32
 			soa_struct->Struct.soa_elem = elem;
 			soa_struct->Struct.soa_count = count;
 
-			scope = create_scope(c->scope, c->allocator);
+			scope = create_scope(c->scope);
 			soa_struct->Struct.scope = scope;
 
 			String params_xyzw[4] = {
@@ -5389,7 +5383,7 @@ bool check_builtin_procedure(CheckerContext *c, Operand *operand, Ast *call, i32
 			soa_struct->Struct.soa_elem = elem;
 			soa_struct->Struct.soa_count = count;
 
-			scope = create_scope(old_struct->Struct.scope->parent, c->allocator);
+			scope = create_scope(old_struct->Struct.scope->parent);
 			soa_struct->Struct.scope = scope;
 
 			for_array(i, old_struct->Struct.fields) {
@@ -6540,10 +6534,8 @@ CALL_ARGUMENT_CHECKER(check_named_call_arguments) {
 	CallArgumentError err = CallArgumentError_None;
 
 	isize param_count = pt->param_count;
-	bool *visited = gb_alloc_array(c->allocator, bool, param_count);
-	defer (gb_free(c->allocator, visited));
-	auto ordered_operands = array_make<Operand>(c->allocator, param_count);
-	defer (array_free(&ordered_operands));
+	bool *visited = gb_alloc_array(temporary_allocator(), bool, param_count);
+	auto ordered_operands = array_make<Operand>(temporary_allocator(), param_count);
 	defer ({
 		for_array(i, ordered_operands) {
 			Operand const &o = ordered_operands[i];
@@ -7338,6 +7330,7 @@ CallArgumentError check_polymorphic_record_type(CheckerContext *c, Operand *oper
 						Entity *e = params->variables[i];
 						if (e->kind == Entity_Constant) {
 							check_expr_with_type_hint(c, &operands[i], fv->value, e->type);
+							continue;
 						}
 					}
 
@@ -7371,13 +7364,26 @@ CallArgumentError check_polymorphic_record_type(CheckerContext *c, Operand *oper
 
 	TypeTuple *tuple = get_record_polymorphic_params(original_type);
 	isize param_count = tuple->variables.count;
+	isize minimum_param_count = param_count;
+	for (minimum_param_count = tuple->variables.count-1; minimum_param_count >= 0; minimum_param_count--) {
+		Entity *e = tuple->variables[minimum_param_count];
+		if (e->kind != Entity_Constant) {
+			break;
+		}
+		if (e->Constant.param_value.kind == ParameterValue_Invalid) {
+			break;
+		}
+	}
 
 	Array<Operand> ordered_operands = operands;
-	if (named_fields) {
-		bool *visited = gb_alloc_array(c->allocator, bool, param_count);
+	if (!named_fields) {
+		ordered_operands = array_make<Operand>(permanent_allocator(), param_count);
+		array_copy(&ordered_operands, operands, 0);
+	} else {
+		bool *visited = gb_alloc_array(temporary_allocator(), bool, param_count);
 
 		// LEAK(bill)
-		ordered_operands = array_make<Operand>(c->allocator, param_count);
+		ordered_operands = array_make<Operand>(permanent_allocator(), param_count);
 
 		for_array(i, ce->args) {
 			Ast *arg = ce->args[i];
@@ -7440,26 +7446,55 @@ CallArgumentError check_polymorphic_record_type(CheckerContext *c, Operand *oper
 		return err;
 	}
 
-	if (param_count < ordered_operands.count) {
-		error(call, "Too many polymorphic type arguments, expected %td, got %td", param_count, ordered_operands.count);
-		err = CallArgumentError_TooManyArguments;
-	} else if (param_count > ordered_operands.count) {
-		error(call, "Too few polymorphic type arguments, expected %td, got %td", param_count, ordered_operands.count);
-		err = CallArgumentError_TooFewArguments;
+	if (minimum_param_count != param_count) {
+		if (param_count < ordered_operands.count) {
+			error(call, "Too many polymorphic type arguments, expected a maximum of %td, got %td", param_count, ordered_operands.count);
+			err = CallArgumentError_TooManyArguments;
+		} else if (minimum_param_count > ordered_operands.count) {
+			error(call, "Too few polymorphic type arguments, expected a minimum of %td, got %td", minimum_param_count, ordered_operands.count);
+			err = CallArgumentError_TooFewArguments;
+		}
+	} else {
+		if (param_count < ordered_operands.count) {
+			error(call, "Too many polymorphic type arguments, expected %td, got %td", param_count, ordered_operands.count);
+			err = CallArgumentError_TooManyArguments;
+		} else if (param_count > ordered_operands.count) {
+			error(call, "Too few polymorphic type arguments, expected %td, got %td", param_count, ordered_operands.count);
+			err = CallArgumentError_TooFewArguments;
+		}
 	}
 
 	if (err != 0) {
 		return err;
 	}
 
+	if (minimum_param_count != param_count) {
+		isize missing_count = 0;
+		// NOTE(bill): Replace missing operands with the default values (if possible)
+		for_array(i, ordered_operands) {
+			Operand *o = &ordered_operands[i];
+			if (o->expr == nullptr) {
+				Entity *e = tuple->variables[i];
+				if (e->kind == Entity_Constant) {
+					missing_count += 1;
+					o->mode = Addressing_Constant;
+					o->type = default_type(e->type);
+					o->expr = unparen_expr(e->Constant.param_value.original_ast_expr);
+					if (e->Constant.param_value.kind == ParameterValue_Constant) {
+						o->value = e->Constant.param_value.value;
+					}
+				}
+			}
+		}
+	}
+
 	i64 score = 0;
 	for (isize i = 0; i < param_count; i++) {
+		Entity *e = tuple->variables[i];
 		Operand *o = &ordered_operands[i];
 		if (o->mode == Addressing_Invalid) {
 			continue;
 		}
-		Entity *e = tuple->variables[i];
-
 		if (e->kind == Entity_TypeName) {
 			if (o->mode != Addressing_Type) {
 				if (show_error) {
@@ -7506,8 +7541,6 @@ CallArgumentError check_polymorphic_record_type(CheckerContext *c, Operand *oper
 	}
 
 	{
-		gbAllocator a = c->allocator;
-
 		bool failure = false;
 		Entity *found_entity = find_polymorphic_record_entity(c, original_type, param_count, ordered_operands, &failure);
 		if (found_entity) {
@@ -7800,7 +7833,7 @@ void check_expr_with_type_hint(CheckerContext *c, Operand *o, Ast *e, Type *t) {
 		err_str = "used as a value";
 		break;
 	case Addressing_Type:
-		err_str = "is not an expression";
+		err_str = "is not an expression but a type";
 		break;
 	case Addressing_Builtin:
 		err_str = "must be called";
@@ -8170,7 +8203,7 @@ ExprKind check_expr_base_internal(CheckerContext *c, Operand *o, Ast *node, Type
 		Type *type = alloc_type(Type_Proc);
 		check_open_scope(&ctx, pl->type);
 		{
-			decl = make_decl_info(ctx.allocator, ctx.scope, ctx.decl);
+			decl = make_decl_info(ctx.scope, ctx.decl);
 			decl->proc_lit  = node;
 			ctx.decl = decl;
 			defer (ctx.decl = ctx.decl->parent);
@@ -8467,7 +8500,7 @@ ExprKind check_expr_base_internal(CheckerContext *c, Operand *o, Ast *node, Type
 			}
 
 			if (cl->elems[0]->kind == Ast_FieldValue) {
-				bool *fields_visited = gb_alloc_array(c->allocator, bool, field_count);
+				bool *fields_visited = gb_alloc_array(temporary_allocator(), bool, field_count);
 
 				for_array(i, cl->elems) {
 					Ast *elem = cl->elems[i];
@@ -9065,6 +9098,9 @@ ExprKind check_expr_base_internal(CheckerContext *c, Operand *o, Ast *node, Type
 			}
 			is_constant = false;
 			{ // Checker values
+				bool key_is_typeid = is_type_typeid(t->Map.key);
+				bool value_is_typeid = is_type_typeid(t->Map.value);
+
 				for_array(i, cl->elems) {
 					Ast *elem = cl->elems[i];
 					if (elem->kind != Ast_FieldValue) {
@@ -9072,13 +9108,22 @@ ExprKind check_expr_base_internal(CheckerContext *c, Operand *o, Ast *node, Type
 						continue;
 					}
 					ast_node(fv, FieldValue, elem);
-					check_expr_with_type_hint(c, o, fv->field, t->Map.key);
+
+					if (key_is_typeid) {
+						check_expr_or_type(c, o, fv->field, t->Map.key);
+					} else {
+						check_expr_with_type_hint(c, o, fv->field, t->Map.key);
+					}
 					check_assignment(c, o, t->Map.key, str_lit("map literal"));
 					if (o->mode == Addressing_Invalid) {
 						continue;
 					}
 
-					check_expr_with_type_hint(c, o, fv->value, t->Map.value);
+					if (value_is_typeid) {
+						check_expr_or_type(c, o, fv->value, t->Map.value);
+					} else {
+						check_expr_with_type_hint(c, o, fv->value, t->Map.value);
+					}
 					check_assignment(c, o, t->Map.value, str_lit("map literal"));
 				}
 			}
@@ -9634,7 +9679,11 @@ ExprKind check_expr_base_internal(CheckerContext *c, Operand *o, Ast *node, Type
 
 		if (is_type_map(t)) {
 			Operand key = {};
-			check_expr_with_type_hint(c, &key, ie->index, t->Map.key);
+			if (is_type_typeid(t->Map.key)) {
+				check_expr_or_type(c, &key, ie->index, t->Map.key);
+			} else {
+				check_expr_with_type_hint(c, &key, ie->index, t->Map.key);
+			}
 			check_assignment(c, &key, t->Map.key, str_lit("map index"));
 			if (key.mode == Addressing_Invalid) {
 				o->mode = Addressing_Invalid;
@@ -10033,7 +10082,7 @@ ExprKind check_expr_base_internal(CheckerContext *c, Operand *o, Ast *node, Type
 			error(x.expr, "Expected a constant string for the inline asm constraints parameter");
 		}
 
-		Scope *scope = create_scope(c->scope, heap_allocator());
+		Scope *scope = create_scope(c->scope);
 		scope->flags |= ScopeFlag_Proc;
 
 		Type *params = alloc_type_tuple();

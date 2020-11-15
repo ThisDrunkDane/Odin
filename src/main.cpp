@@ -342,9 +342,9 @@ i32 linker_stage(lbGenerator *gen) {
 					lib_name = remove_extension_from_path(lib_name);
 					lib_str = gb_string_append_fmt(lib_str, " -framework %.*s ", LIT(lib_name));
 				} else if (string_ends_with(lib, str_lit(".a")) || string_ends_with(lib, str_lit(".o")) || string_ends_with(lib, str_lit(".dylib"))) {
-          				// For:
-          				// object 
-          				// dynamic lib
+					// For:
+					// object
+					// dynamic lib
 					// static libs, absolute full path relative to the file in which the lib was imported from
 					lib_str = gb_string_append_fmt(lib_str, " %.*s ", LIT(lib));
 				} else {
@@ -382,20 +382,33 @@ i32 linker_stage(lbGenerator *gen) {
 		// Unlike the Win32 linker code, the output_ext includes the dot, because
 		// typically executable files on *NIX systems don't have extensions.
 		String output_ext = {};
-		char const *link_settings = "";
+		gbString link_settings = gb_string_make_reserve(heap_allocator(), 32);
 		char const *linker;
 		if (build_context.build_mode == BuildMode_DynamicLibrary) {
+			// NOTE(tetra, 2020-11-06): __$startup_runtime must be called at DLL load time.
+			// Clang, for some reason, won't let us pass the '-init' flag that lets us do this,
+			// so use ld instead.
+			// :UseLDForShared
+			linker = "ld";
+			link_settings = gb_string_appendc(link_settings, "-init '__$startup_runtime' ");
 			// Shared libraries are .dylib on MacOS and .so on Linux.
 			#if defined(GB_SYSTEM_OSX)
 				output_ext = STR_LIT(".dylib");
-				link_settings = "-dylib -dynamic";
+				link_settings = gb_string_appendc(link_settings, "-dylib -dynamic ");
 			#else
 				output_ext = STR_LIT(".so");
-				link_settings = "-shared";
+				link_settings = gb_string_appendc(link_settings, "-shared ");
 			#endif
 		} else {
-			// TODO: Do I need anything here?
-			link_settings = "";
+			#if defined(GB_SYSTEM_OSX)
+				linker = "ld";
+			#else
+				// TODO(zangent): Figure out how to make ld work on Linux.
+				//   It probably has to do with including the entire CRT, but
+				//   that's quite a complicated issue to solve while remaining distro-agnostic.
+				//   Clang can figure out linker flags for us, and that's good enough _for now_.
+				linker = "clang -Wno-unused-command-line-argument";
+			#endif
 		}
 
 		if (build_context.out_filepath.len > 0) {
@@ -405,16 +418,6 @@ i32 linker_stage(lbGenerator *gen) {
 				output_ext = substring(build_context.out_filepath, pos, build_context.out_filepath.len);
 			}
 		}
-
-		#if defined(GB_SYSTEM_OSX)
-			linker = "ld";
-		#else
-			// TODO(zangent): Figure out how to make ld work on Linux.
-			//   It probably has to do with including the entire CRT, but
-			//   that's quite a complicated issue to solve while remaining distro-agnostic.
-			//   Clang can figure out linker flags for us, and that's good enough _for now_.
-			linker = "clang -Wno-unused-command-line-argument";
-		#endif
 
 		exit_code = system_exec_command_line_app("ld-link",
 			"%s %s -o \"%.*s%.*s\" %s "
@@ -443,7 +446,7 @@ i32 linker_stage(lbGenerator *gen) {
 		if (exit_code != 0) {
 			return exit_code;
 		}
-    
+
 	#if defined(GB_SYSTEM_OSX)
 		if (build_context.ODIN_DEBUG) {
 			// NOTE: macOS links DWARF symbols dynamically. Dsymutil will map the stubs in the exe
@@ -578,6 +581,7 @@ enum BuildFlagKind {
 	BuildFlag_NoBoundsCheck,
 	BuildFlag_NoDynamicLiterals,
 	BuildFlag_NoCRT,
+	BuildFlag_NoEntryPoint,
 	BuildFlag_UseLLD,
 	BuildFlag_Vet,
 	BuildFlag_UseLLVMApi,
@@ -678,6 +682,7 @@ bool parse_build_flags(Array<String> args) {
 	add_flag(&build_flags, BuildFlag_NoBoundsCheck,     str_lit("no-bounds-check"),     BuildFlagParam_None);
 	add_flag(&build_flags, BuildFlag_NoDynamicLiterals, str_lit("no-dynamic-literals"), BuildFlagParam_None);
 	add_flag(&build_flags, BuildFlag_NoCRT,             str_lit("no-crt"),              BuildFlagParam_None);
+	add_flag(&build_flags, BuildFlag_NoEntryPoint,      str_lit("no-entry-point"),      BuildFlagParam_None);
 	add_flag(&build_flags, BuildFlag_UseLLD,            str_lit("lld"),                 BuildFlagParam_None);
 	add_flag(&build_flags, BuildFlag_Vet,               str_lit("vet"),                 BuildFlagParam_None);
 	add_flag(&build_flags, BuildFlag_UseLLVMApi,        str_lit("llvm-api"),            BuildFlagParam_None);
@@ -1090,6 +1095,10 @@ bool parse_build_flags(Array<String> args) {
 
 						case BuildFlag_NoCRT:
 							build_context.no_crt = true;
+							break;
+
+						case BuildFlag_NoEntryPoint:
+							build_context.no_entry_point = true;
 							break;
 
 						case BuildFlag_UseLLD:
@@ -1634,12 +1643,16 @@ int main(int arg_count, char const **arg_ptr) {
 	timings_init(timings, str_lit("Total Time"), 128);
 	defer (timings_destroy(timings));
 
+	arena_init(&permanent_arena, heap_allocator());
+	temp_allocator_init(&temporary_allocator_data, 16*1024*1024);
+	arena_init(&global_ast_arena, heap_allocator());
+	permanent_arena.use_mutex = true;
+
 	init_string_buffer_memory();
 	init_string_interner();
 	init_global_error_collector();
 	init_keyword_hash_table();
 	global_big_int_init();
-	arena_init(&global_ast_arena, heap_allocator());
 
 	array_init(&library_collections, heap_allocator());
 	// NOTE(bill): 'core' cannot be (re)defined by the user
@@ -1786,6 +1799,8 @@ int main(int arg_count, char const **arg_ptr) {
 		return 1;
 	}
 
+	temp_allocator_free_all(&temporary_allocator_data);
+
 	if (build_context.generate_docs) {
 		// generate_documentation(&parser);
 		return 0;
@@ -1803,6 +1818,7 @@ int main(int arg_count, char const **arg_ptr) {
 		check_parsed_files(&checker);
 	}
 
+	temp_allocator_free_all(&temporary_allocator_data);
 
 	if (build_context.no_output_files) {
 		if (build_context.query_data_set_settings.ok) {
@@ -1832,6 +1848,8 @@ int main(int arg_count, char const **arg_ptr) {
 			return 1;
 		}
 		lb_generate_code(&gen);
+
+		temp_allocator_free_all(&temporary_allocator_data);
 
 		switch (build_context.build_mode) {
 		case BuildMode_Executable:
@@ -1910,11 +1928,17 @@ int main(int arg_count, char const **arg_ptr) {
 		timings_start_section(timings, str_lit("llvm ir gen"));
 		ir_gen_tree(&ir_gen);
 
+		temp_allocator_free_all(&temporary_allocator_data);
+
 		timings_start_section(timings, str_lit("llvm ir opt tree"));
 		ir_opt_tree(&ir_gen);
 
+		temp_allocator_free_all(&temporary_allocator_data);
+
 		timings_start_section(timings, str_lit("llvm ir print"));
 		print_llvm_ir(&ir_gen);
+
+		temp_allocator_free_all(&temporary_allocator_data);
 
 
 		String output_name = ir_gen.output_name;
@@ -2136,11 +2160,11 @@ int main(int arg_count, char const **arg_ptr) {
 						String lib_name = lib;
 						lib_name = remove_extension_from_path(lib_name);
 						lib_str = gb_string_append_fmt(lib_str, " -framework %.*s ", LIT(lib_name));
-						
+
 				} else if (string_ends_with(lib, str_lit(".a")) || string_ends_with(lib, str_lit(".o")) || string_ends_with(lib, str_lit(".dylib"))) {
-          				// For:
-          				// object 
-          				// dynamic lib
+					// For:
+					// object
+					// dynamic lib
 					// static libs, absolute full path relative to the file in which the lib was imported from
 					lib_str = gb_string_append_fmt(lib_str, " %.*s ", LIT(lib));
 				} else {
@@ -2171,21 +2195,35 @@ int main(int arg_count, char const **arg_ptr) {
 			// Unlike the Win32 linker code, the output_ext includes the dot, because
 			// typically executable files on *NIX systems don't have extensions.
 			String output_ext = {};
-			char const *link_settings = "";
+			gbString link_settings = gb_string_make_reserve(heap_allocator(), 32);
 			char const *linker;
 			if (build_context.build_mode == BuildMode_DynamicLibrary) {
+				// NOTE(tetra, 2020-11-06): __$startup_runtime must be called at DLL load time.
+				// Clang, for some reason, won't let us pass the '-init' flag that lets us do this,
+				// so use ld instead.
+				// :UseLDForShared
+				linker = "ld";
+				link_settings = gb_string_appendc(link_settings, "-init '__$startup_runtime' ");
 				// Shared libraries are .dylib on MacOS and .so on Linux.
 				#if defined(GB_SYSTEM_OSX)
 					output_ext = STR_LIT(".dylib");
-					link_settings = "-dylib -dynamic";
+					link_settings = gb_string_appendc(link_settings, "-dylib -dynamic ");
 				#else
 					output_ext = STR_LIT(".so");
-					link_settings = "-shared";
+					link_settings = gb_string_appendc(link_settings, "-shared ");
 				#endif
 			} else {
-				// TODO: Do I need anything here?
-				link_settings = "";
+				#if defined(GB_SYSTEM_OSX)
+					linker = "ld";
+				#else
+					// TODO(zangent): Figure out how to make ld work on Linux.
+					//   It probably has to do with including the entire CRT, but
+					//   that's quite a complicated issue to solve while remaining distro-agnostic.
+					//   Clang can figure out linker flags for us, and that's good enough _for now_.
+					linker = "clang -Wno-unused-command-line-argument";
+				#endif
 			}
+
 
 			if (build_context.out_filepath.len > 0) {
 				//NOTE(thebirk): We have a custom -out arguments, so we should use the extension from that
@@ -2195,15 +2233,6 @@ int main(int arg_count, char const **arg_ptr) {
 				}
 			}
 
-			#if defined(GB_SYSTEM_OSX)
-				linker = "ld";
-			#else
-				// TODO(zangent): Figure out how to make ld work on Linux.
-				//   It probably has to do with including the entire CRT, but
-				//   that's quite a complicated issue to solve while remaining distro-agnostic.
-				//   Clang can figure out linker flags for us, and that's good enough _for now_.
-				linker = "clang -Wno-unused-command-line-argument";
-			#endif
 
 			exit_code = system_exec_command_line_app("ld-link",
 				"%s \"%.*s.o\" -o \"%.*s%.*s\" %s "
