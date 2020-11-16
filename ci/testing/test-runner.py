@@ -3,7 +3,11 @@ import platform
 import subprocess
 import sys
 
-import win32api
+try:
+    import win32api
+except ImportError:
+    pass
+
 from colorama import Fore, Style
 
 VERSION_STR = 'v0.2.0'
