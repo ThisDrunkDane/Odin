@@ -121,9 +121,11 @@ def print_failed_summary(failed_tests):
     print(f'{Fore.RED}Failed tests summary:{Style.RESET_ALL}')
     for ft in failed_tests:
         print(f"-- {ft.file_name}")
-        print(f'Error Code: ', end='')
-        print(
-            f'{Fore.RED}{ft.exit_code}{Style.RESET_ALL} -> {error_code_map.get(ft.exit_code, "No translation found")}')
+        print(f'Error Code: {Fore.RED}{ft.exit_code}{Style.RESET_ALL}', end='')
+        if platform.system() == 'Windows':
+            print(f' -> {error_code_map.get(ft.exit_code, "No translation found")}')
+        else:
+            print('\n')
         print(f'Output: ', end='')
         if len(ft.output) > 0:
             print(f'\n{Style.DIM}== START OF OUTPUT =={Style.RESET_ALL}')
