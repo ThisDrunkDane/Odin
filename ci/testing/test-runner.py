@@ -108,7 +108,7 @@ class TestCollection:
         for test in self.test_files:
             print(f"--{test.file_name} ...", end=' ')
             test.run()
-            if test.exit_code > 0:
+            if test.exit_code != 0:
                 print(f'{Fore.RED}FAIL ({test.exit_code}){Style.RESET_ALL}')
             else:
                 print(f'{Fore.GREEN}SUCCESS{Style.RESET_ALL}')
