@@ -85,7 +85,11 @@ class TestFile:
         self.exit_code = 0
 
     def run(self):
-        process = subprocess.Popen(["odin", "run", self.full_path],
+        extra = ''
+        if use_llvm is True:
+            extra += '--llvm-api'
+
+        process = subprocess.Popen(["odin", "run", self.full_path, extra],
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    universal_newlines=True)
         self.output, _ = process.communicate()
@@ -135,12 +139,17 @@ def print_failed_summary(failed_tests):
             print("No output...")
         print()
 
+use_llvm = False
 
 def main():
     if platform.system() == 'Windows':
         win32api.SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX)
 
+    
     root_test_dir = sys.argv[1]
+    if len(sys.argv) > 2:
+        global use_llvm
+        use_llvm = bool(sys.argv[2])
 
     print(f'Odin test runner {VERSION_STR}')
     print(f'Looking for tests in \'{root_test_dir}\'...')
